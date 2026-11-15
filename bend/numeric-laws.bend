@@ -60,3 +60,11 @@ law word_state_bounds:
   for +amount: Nat
   for p: Core.Bounds(Core.word_max(), s)
   Core.Bounds(Core.word_max(), Core.state(Core.add(Core.word_max(), s, amount)))
+
+law count_exhaustion_rejects:
+  for +limit: Nat
+  for +nat: Nat
+  for +total: Nat
+  for +bits: U32
+  for +amount: Nat
+  {Core.add(limit, Core.Numeric{nat, total, limit, bits}, amount) == Core.Rejected{Core.Numeric{nat, total, limit, bits}} : Core.Outcome}

@@ -31,6 +31,7 @@ test('capabilities distinguish available execution profiles from unverified hard
     profiles: z.array(z.discriminatedUnion('status', [
       z.strictObject({ profile: z.string(), status: z.literal('available') }),
       z.strictObject({ profile: z.string(), status: z.literal('unavailable'), reason: z.string().min(1) }),
+      z.strictObject({ profile: z.string(), status: z.literal('excluded'), scope: z.literal('phase2'), reason: z.string().min(1) }),
     ])),
   }).parse(await response.json());
   assert.deepEqual(listed.kinds.map(row => row.kind), [...SESSION_KINDS]);
@@ -38,7 +39,7 @@ test('capabilities distinguish available execution profiles from unverified hard
     { profile: 'native-cpu', status: 'available' },
     { profile: 'multithreaded-cpu', status: 'available' },
     { profile: 'gpu', status: 'unavailable', reason: 'No configured GPU execution instrumentation' },
-    { profile: 'graphics-audio', status: 'unavailable', reason: 'No configured display or audio capture fixture' },
+    { profile: 'graphics-audio', status: 'excluded', scope: 'phase2', reason: 'Native window and audio effects are excluded from the agreed Phase 2 scope' },
   ]);
 });
 
@@ -116,7 +117,7 @@ test('HTTP rejects wrong kinds, unknown sessions, malformed commands, and unavai
     method: 'POST', headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ json: { kind: 'compute', execution: { profile: 'gpu' } } }),
   });
-  assert.equal(profile.status, 400);
+  assert.equal(profile.status, 503);
   await profile.text();
   assert.deepEqual(await remote.numeric.command({ sessionId, command: { kind: 'read' } }), {
     kind: 'value', value: { nat: '0', total: 0, count: 0, f32Bits: 0 },

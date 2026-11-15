@@ -76,3 +76,20 @@ def Laws.reset_idempotent(s):
 
 def Laws.word_state_bounds(s, amount, p):
   Laws.add_preserves_bounds(Core.word_max(), s, amount, p)
+
+def successor_exceeds(+limit: Nat) -> {Nat.is_le(1n+limit, limit) == False{} : Bool}:
+  match limit:
+    case 0n: {==}
+    case 1n+p: successor_exceeds(p)
+
+def and_false(a: Bool) -> {Bool.and(a, False{}) == False{} : Bool}:
+  match a:
+    case False{}: {==}
+    case True{}: {==}
+
+def exhausted_guard(+limit: Nat, total: Nat, amount: Nat) -> {Core.guard(limit, total, limit, amount) == False{} : Bool}:
+  %Equal.sym(Bool, Nat.is_le(1n+limit, limit), False{}, successor_exceeds(limit)) : {Bool.and(Nat.is_le(Nat.add(total, amount), limit), _) == False{} : Bool}
+  and_false(Nat.is_le(Nat.add(total, amount), limit))
+
+def Laws.count_exhaustion_rejects(limit, nat, total, bits, amount):
+  Laws.rejection_preserves_state(limit, nat, total, limit, bits, amount, exhausted_guard(limit, total, amount))

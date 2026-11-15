@@ -17,10 +17,13 @@ export type SessionId = z.infer<typeof sessionIdSchema>;
 export const executionSchema = z.discriminatedUnion('profile', [
   z.strictObject({ profile: z.literal('native-cpu') }),
   z.strictObject({ profile: z.literal('multithreaded-cpu'), threads: z.number().int().min(2).max(64) }),
+  z.strictObject({ profile: z.literal('gpu') }),
 ]);
 export const createSessionSchema = z.strictObject({
   kind: sessionKindSchema,
   execution: executionSchema.default({ profile: 'native-cpu' }),
+}).refine(input => input.execution.profile !== 'gpu' || input.kind === 'compute', {
+  message: 'GPU execution supports only compute sessions', path: ['execution', 'profile'],
 });
 export type CreateSession = z.infer<typeof createSessionSchema>;
 export const createdSessionSchema = z.strictObject({

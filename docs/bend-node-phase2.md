@@ -1,276 +1,246 @@
-# BendFlow Phase 2: testing stateful and effectful native computation
+# BendFlow Phase 2 status and scope
 
-## Phase 2 status
+## Portable completion
 
-Phase 2 has completed its gateway and validation foundation. All eight session kinds have typed HTTP create, command, and close routes. The recorded native CPU baseline passes, including compute on four CPU threads. The broader conformance work remains in progress. Local CUDA-enabled executable compilation is now verified, but actual GPU execution remains unavailable on this WSL2 host.
+Portable Phase 2 is complete as of November 15, 2026. The last full `npm test` run passed 273 tests, with 0 failures and 0 skips. The current portable completion checker reports no blockers. Full completion of the agreed scope remains in progress because actual CUDA execution and a matching production `.gpu` artifact need a compatible native Linux GPU runner.
 
-The agreed completion scope includes portable CPU and compiler conformance plus CUDA GPU coverage on a compatible native Linux runner. Native window and audio effects are excluded by the user's decision. Pure image rendering, event-state computation, and sample synthesis remain in scope. The inventory still lists `hardware.window` and `hardware.audio` as unavailable; synchronize their reasons and the completion policy with this scope when restoring the inventory.
+The inventory has 77 rows: 74 verified, 0 pending, 1 unavailable GPU row, and 2 excluded window and audio rows. Native window and audio effects are excluded by agreement. Pure image rendering, event-state computation, and sample synthesis are verified portable requirements.
 
-The retained inventory has 40 rows marked verified, 34 pending portable feature rows, and 3 unavailable hardware rows. CUDA compilation checks do not promote `hardware.gpu` to verified. Two of the hardware rows are now excluded from the agreed scope.
+The current portable toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. Lean `4.34.0` supports the BendTT kernel check of 25 generic pure-core laws: 15 compute laws and 10 numeric laws connected to production helpers.
 
-The [completion plan](bend-node-phase2-completion-plan.md) orders the remaining work. The feature inventory records pending nested encodings, paging, language features, effect failure sequences, balanced parallel algorithms, and pure-core proofs. Passing the current suite does not establish completion of those requirements.
+The earlier 124-test foundation run and its 34 pending portable rows are historical. The inventory migration and portable implementation are complete. This document is the consolidated Phase 2 status, architecture, protocol, verification, and remaining-work reference.
 
-The current working tree has reorganized scripts and tests. Its inventory loader expects `tests/conformance/coverage.json`, but the retained inventory is still at `tests/phase2/coverage.json` with old test references. A targeted inventory load fails with `ENOENT`. Restore the evidence paths and rerun the checks before treating the recorded passing baseline as current. The completion plan includes this prerequisite as milestone 0.
+## Milestone status
 
-The implementation includes:
+| Milestone | Status | Acceptance evidence |
+| --- | --- | --- |
+| 0. Reproducible baseline | Done | Inventory paths and exact test references load, and the full suite regenerates the executed report. |
+| 1. Inventory and completion rules | Done | Missing requirements, duplicate IDs, invalid references, and failed or skipped evidence block verification. Portable and full outcomes remain distinct. |
+| 2. Contracts and serialization | Done | Complete encoded bounds, nested structures, native golden vectors, malformed-input rejection, and large-result reassembly agree across Node and Bend. |
+| 3. All-kind HTTP gateway | Done | Separate clients repeatedly use and close all eight kinds. Admission, isolation, busy and deadline errors, startup overlap, and cleanup have evidence. |
+| 4. Numeric and collection conformance | Done | Independent oracles, language features, arrays, and maximum-size sort order and multiset preservation have evidence. |
+| 5. Affine resources and networking | Done | Filesystem and peer observations cover retained ownership, recovery, resource exhaustion, fragmentation, backpressure, UDP metadata, cleanup, and uncertain effects. |
+| 6. Tasks, processes, and custom effects | Done | Handshakes prove ownership transfer and exactly-once collection. Process and custom-effect fixtures independently observe inputs, outputs, failures, and recovery. |
+| 7. Parallel compute, rendering, and samples | Done | Balanced algorithms agree across one, two, and four CPU threads. Simulation, frames, and samples have independent references and paging evidence. |
+| 8. Compiler and pure-core proofs | Done | Positive fixtures pass, invalid fixtures fail for intended diagnostics, and 25 production-connected laws pass the kernel. |
+| 9. CUDA artifacts and runner verification | Hardware verification remains | GPU-marked workloads, variants, fallback, instrumentation, evidence validation, HTTP admission, and package checks are implemented. Actual device execution and a matching artifact remain required. |
+| 10. Final conformance and publication | Portable done | The portable suite and completion gate pass. Full acceptance depends on milestone 9. |
 
-- One native executable per session kind, one process per session, and native `initialize`, `command`, and `shutdown` operations.
-- A shared worker loop in `bend/loop.bend` and a shared codec in `bend/bytes.bend`.
-- Strict command and reply schemas for every kind under `contracts/`, validated codecs in `src/protocol/apps.ts`, and `NativeApp` in `src/app.ts`.
-- A session-owning HTTP gateway in `src/gateway.ts` and `src/apps.ts`, and a reply-validating client in `src/client.ts`.
-- Gateway capabilities that list supported session kinds and distinguish available profiles from verified test results.
-- Tests under `tests/unit/`, `tests/integration/`, `tests/compiler/`, and `tests/types/`.
-- A retained feature-level coverage inventory in `tests/phase2/coverage.json`, with required feature IDs in `scripts/conformance/requirements.ts`. The planned inventory destination is `tests/conformance/coverage.json`.
-- An executed-test report in `build/phase2-results.json`. Verified rows require an actual passing test with the referenced file and name.
+## Implemented applications
 
-The foundation also includes:
+All eight session kinds have typed HTTP create, command, and close routes. Each session owns one persistent native process. Multiple external clients can use the same session ID, while separate sessions retain isolated state and resources.
 
-- Separate-process HTTP lifecycle tests for all eight kinds.
-- Two independent file client processes sharing a retained affine handle, recovery after a failed read, and an independent filesystem observation.
-- A bounded JSON byte serializer shared by the gateway and client.
-- Strict UTF-8 validation in Node and native Bend, including raw-input rejection without state mutation.
-- Native read-size bounds and bounded oversized-output errors.
-- An idle native shutdown acknowledgement after resource cleanup, with forced termination for stalled workers.
-- Cleanup-failure propagation when gateway shutdown overlaps session startup.
-
-Independent fixtures observe the effects:
-
-- File writes and offset edits match `fs.readFile`.
-- TCP and UDP tests use separate peers.
-- `Process.run` uses `/bin/echo` and `/bin/ls`.
-- A custom C effect writes a marker file.
-- `IO.within` still prints after the timeout.
-- Compute returns four CPU `Image` pixels and reports `IO.thread_count`.
-
-`f32Add` bitcasts `U32` payloads to `F32`, so NaN follows native bits rather than JSON numbers. The Bend checker rejects duplicated affine numeric state, a match on a computed value, a non-decreasing recursive call, and a live use of an erased binder.
-
-The recorded baseline has a successful `npx tsc --noEmit` and an `npm test` run with 124 passed, 0 failed, and 0 skipped. That run passed both Phase 1 and Phase 2 tests and wrote the conformance report. Its verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending. The CUDA setup changes also passed `npx tsc --noEmit`. A full native rebuild was interrupted; the compute worker and CUDA probe were subsequently built and checked separately. The reorganized working tree needs a fresh full verification run after the inventory paths are repaired.
-
-### CUDA build verification
-
-CUDA 13.1 build components are installed locally under `.toolchain/cuda`, with Clang 19.1.1 available for GPU-marked builds. `scripts/setup/cuda.ts`, `scripts/setup/clang.ts`, and `scripts/lib/toolchain.ts` support the local setup. `scripts/build/native.ts` records the deployment constraints.
-
-The fixture `tests/fixtures/phase2/gpu-check.bend` uses balanced parallel recursion and `pow2!(10n)`. It was compiled with the same Clang 19 compiler both without and with CUDA support:
-
-| Check | Observed result |
+| Session | Verified scope |
 | --- | --- |
-| CPU-only executable | 45,784 bytes; prints `1024` |
-| CUDA-enabled executable | 137,920 bytes; additionally links `libcuda.so.1` and `libnvrtc.so.13` |
-| CUDA-enabled executable with `--gpu off` | Prints `1024`; CUDA shared libraries are still required |
-| CUDA-enabled executable with `--gpu on` in WSL2 | Exits with code 1 and `CUDA device lacks concurrent managed access (WSL2 lacks it)` |
-| `--gpu-build` in WSL2 | Returns success without creating the `.gpu` artifact |
-| Existing compute worker rebuilt with Clang 18 | Byte-for-byte identical to the previous executable; it has no `!` calls |
+| Numeric | Persistent totals, reset, arithmetic, conversion, comparison, booleans, bit operations, parsing and formatting, native bounds, and explicit F32 bits |
+| Collection | Nested records and tuples, lists, folds, sets, maps, arrays, sorting, templates, polymorphism, affine closures, dependent structures, monads, and retained item pages |
+| File | Retained affine handles, append, EOF, text and bytes, offsets, multiple resources, failure recovery, isolation, cleanup, and retained byte pages |
+| Network | Persistent TCP sockets and listeners, accept and polling, fragmentation, half-close and peer failures, backpressure, UDP boundaries and sender metadata, timers, and cleanup |
+| Task | Fork and join, spawn and channels, handshake-proven ordering, affine resource transfer, exactly-once collection, timeouts, late effects, and shutdown |
+| Process | Environment and arguments, bounded random values, fixed process fixtures, exact input and output, exit status, launch failures, timeouts, and output limits |
+| Compute | Balanced sum and sort, CPU thread configurations, stateful simulation and events, deterministic frames, pure samples, paging, and production-connected pure-core laws |
+| Custom effect | Registered C effects, returned constructors, immediate results, helper-thread work, parked IO, failure recovery, retained results, isolation, and external writes |
 
-The host exposes an NVIDIA GeForce RTX 4060 Laptop GPU through Windows driver `591.59`. CUDA driver initialization succeeds, but the device reports `concurrent_managed_access = 0`. The pinned Bend runtime requires that capability. These checks verify compilation and CPU fallback, not successful GPU execution.
+All command families have cross-language golden vectors and malformed-input evidence. HTTP tests independently observe effect families and their applicable failure sequences.
 
-For Node-package deployment, retain separate CPU-only and CUDA-enabled executable variants. A CUDA-enabled executable needs its CUDA libraries even when GPU execution is disabled. Generate the matching `.gpu` artifact and run CUDA-specific tests on a native Linux runner with a supported NVIDIA GPU, CUDA libraries, and concurrent managed access. Record actual device execution evidence before verifying the GPU profile.
+## Code and evidence locations
 
-After repairing the inventory paths, rerun the portable checks:
+- `bend/loop.bend` owns the shared native lifecycle, and `bend/bytes.bend` supplies shared wire helpers.
+- `contracts/` defines strict command, reply, session, and page schemas.
+- `src/protocol/codecs/` implements application codecs. `NativeApp` in `src/app.ts` owns each native process.
+- `AppSessions` in `src/apps.ts` owns HTTP session admission, lookup, startup, and shutdown. `src/gateway.ts` exposes the routes, and `src/client.ts` validates replies.
+- Tests live under `tests/unit/`, `tests/integration/`, `tests/compiler/`, and `tests/types/`.
+- `scripts/conformance/requirements.ts` defines required feature IDs. `tests/conformance/coverage.json` maps them to commands, profiles, exact tests, and independent evidence.
+- `build/phase2-results.json` is the generated, Git-ignored executed-test report. Missing, failed, or skipped referenced tests block verified claims.
+
+Native cross-language tests are in `tests/integration/native-codec-vectors.test.ts`, `collection-file-native-vectors.test.ts`, `compute-native-vectors.test.ts`, and `effect-native-vectors.test.ts`. Their compiled fixtures live under `tests/fixtures/codecs/`. Numeric and custom integration tests also check native golden bytes.
+
+Independent observers check exact filesystem writes, controlled TCP and UDP traffic, process arguments and streams, and custom-effect markers. Arithmetic, bit-level, sorting, simulation, pixel, and sample references check pure outputs. Thread counts establish configuration, not a speedup. Process reaping is supplemented by observed native cleanup.
+
+## HTTP routes and execution profiles
+
+`startAppGateway` binds to `127.0.0.1`. Its returned `url` ends in `/rpc`. `createAppClient` supplies typed routes and validates replies against `contracts/apps.ts`.
+
+| Route | Input | Result |
+| --- | --- | --- |
+| `sessions/create` | A session `kind` and optional `execution` | A session ID, kind, and execution configuration |
+| `<kind>/command` | A session ID and that kind's command | That kind's reply union |
+| `sessions/close` | A session ID | `{ kind: 'ok' }` |
+
+Session IDs are UUIDs. Native resource IDs are positive `U32` values local to their session. An unknown session or a command routed to the wrong kind returns `NOT_FOUND`. Closing an already closed session returns `ok`.
+
+Execution defaults to `{ profile: 'native-cpu' }`. Multithreaded execution uses `{ profile: 'multithreaded-cpu', threads }`, with an integer thread count between 2 and 64. The contract accepts `{ profile: 'gpu' }` only for compute sessions, subject to the evidence gate described below.
+
+`GET /capabilities` is outside `/rpc`. It lists kinds and execution profiles. Verified configured GPU evidence adds an available entry with `scope: 'sessions'` and `kinds: ['compute']`. The `graphics-audio` profile has `status: 'excluded'` and `scope: 'phase2'`. Availability describes gateway support; executed tests and hardware evidence establish verification.
+
+## Binary values and limits
+
+The client and gateway share an oRPC custom JSON serializer with type ID `1000`. It encodes `Uint8Array` values as byte-integer arrays with oRPC metadata and reconstructs validated bytes on receipt. Plain objects with numeric keys are not byte values.
+
+| Value | Limit or encoding |
+| --- | --- |
+| HTTP request body | 4096 bytes |
+| Native frame body | 256 bytes |
+| Native application payload | 248 bytes |
+| Default string | 96 UTF-8 bytes |
+| Default binary field | 192 bytes |
+| Command or page `U32` list | 32 items |
+| `Nat` | $0$ through $2^{48}-1$, six bytes on the native wire |
+| `U32` and F32 bits | Four big-endian bytes |
+| Timer inputs | At most 10000 milliseconds |
+| Default session admission | 16 live, starting, or closing sessions |
+
+Commands can impose smaller bounds. Task text, process input and arguments, network hosts, and datagram sends have command-specific limits in their schemas and codecs. TCP and UDP receive sizes range from 1 to 192 bytes; file read sizes range from 0 to 192 bytes. Complete encoded commands and replies must fit the payload bound, including nested fields and metadata.
+
+Strings must contain well-formed Unicode. Node and native decoders reject overlong UTF-8, surrogate encodings, and code points above `U+10FFFF`. Command schemas reject extra fields. Native codecs reject unknown tags, truncated fields, and trailing bytes before effects.
+
+Native string replies have a 96-byte limit. Oversized process or environment output returns `{ kind: 'fail', code: 75, message: 'reply exceeds text bound' }`. Oversized error messages retain their code with a bounded replacement message. These errors do not imply rollback of an external effect.
+
+## Snapshot pages
+
+The shared schemas in `contracts/pages.ts` define these envelopes:
+
+```ts
+	{ kind: 'snapshot', snapshot, total }
+	{ kind: 'page', snapshot, offset, max } // Request
+	{ kind: 'page', snapshot, offset, total, count, done, data } // Reply
+	{ kind: 'release', snapshot } // Request
+```
+
+The snapshot token is a positive session-local `U32`, distinct from an HTTP session ID. Offsets, totals, and counts measure items for collection and compute pages, and bytes for file pages. `count` equals `data.length`. `done` is true exactly when `offset + count === total`. A nonfinal page cannot be empty. Offset equal to total returns an empty final page; offset beyond total fails.
+
+| Result | Capture command | Maximum total | Maximum page | `data` |
+| --- | --- | --- | --- | --- |
+| Collection items | `capture` | 1024 items | 32 items | `U32[]` |
+| File bytes | `capture` with resource `id` | 65536 bytes | 192 bytes | `Uint8Array` |
+| Rendered frame | `render` with depth 0 through 4 | 256 pixels | 32 items | `U32[]` |
+| Synthesized samples | `samples` with count 0 through 512 | 512 samples | 32 items | `U32[]` of F32 bits |
+
+Each session retains one snapshot. Collection and file capture replace the previous snapshot after successful capture, making old tokens stale. Ordinary mutations preserve retained data. Their release returns `ok` for an absent or old token and clears data only for the matching token. Capture limits and token exhaustion preserve the previous snapshot.
+
+Compute capture returns `{ kind: 'error', reason: 'busy' }` while a snapshot is retained. Simulation commands preserve retained data. Matching release returns `ok`; missing or mismatched tokens return `stale`. Invalid offsets return `range`. Collection and file page failures use `stale` or `invalidOffset`, with `limit` and `exhausted` for capture failures. Tokens never wrap and replace live snapshots.
+
+File capture calls `File.read_at` at offset zero with a 65537-byte read to detect files beyond the 65536-byte bound. Pages remain stable after capture. The read is not an atomic filesystem snapshot against concurrent external writes.
+
+`collectSnapshot` reassembles pages and validates identity, total, offset, count, and completion. The caller supplies the result's total limit and page cap and releases the snapshot separately. The collector returns a `number[]`, including for file bytes.
+
+## Stateful effects and ownership
+
+The native application transition is $step : State \times Command \rightarrow IO(State \times Reply)$. Pure commands call pure helpers. Effectful commands retain or consume affine resources and return updated native state with a bounded reply.
+
+One executable per application kind keeps unrelated affine state and resource tables separate. One process per session provides isolation and explicit cleanup. Bend owns computation and effects; Node owns HTTP and process lifecycle. Large results use pages while preserving the Phase 1 framing limit.
+
+No Bend closure, native pointer, runtime type, or OS descriptor crosses HTTP. The external client receives an opaque resource ID. A resource table removes an affine handle, consumes it in an operation, and reinserts the returned handle when the operation supports recovery. Explicit close omits reinsertion.
+
+The gateway admits one command per worker at a time. Competing commands return `TOO_MANY_REQUESTS`. A hard deadline returns `GATEWAY_TIMEOUT` and makes the worker terminal. Worker loss and protocol failures return `SERVICE_UNAVAILABLE`. Commands are never automatically replayed after an uncertain outcome. Tests distinguish application errors, effect failures, infrastructure failures, and effects whose reply was lost. An error does not imply rollback.
+
+Idle shutdown consumes native state, explicitly closes resources, and acknowledges cleanup. Stalled workers have bounded forced termination. Concurrent close shares cleanup, and gateway shutdown waits for overlapping startups. Cleanup failures propagate.
+
+For an idle application, native operation `3` with an empty payload invokes shutdown, replies `[0]`, and closes the transport. A nonempty shutdown payload receives `[255]` without closing the application. `terminationGraceMs` defaults to 100 milliseconds. Busy, stalled, failed, or unresponsive workers use forced termination. Node rejects commands as soon as close starts.
+
+`IO.within` does not cancel the losing computation. A timeout does not return ownership held by that computation. Controlled channel handshakes prove task ordering, and external markers prove late effects and no replay. These are runtime observations, separate from pure-core proofs.
+
+Task sessions immediately collect successful timeout acknowledgements, reap completed late acknowledgements between commands, and cap still-pending losing computations at 16. Graceful shutdown drains pending work, but forced termination does not promise completion of outstanding effects.
+
+## Compiler and proof scope
+
+Positive fixtures exercise affine resources and closures, erased parameters, templates, dependent structures, and concrete polymorphism. Negative fixtures check the intended diagnostic for duplicated affine values, invalid erased use, invalid templates or dependent inputs, computed matches, non-decreasing recursion, and missing or false laws.
+
+The `--verdict` checks cover 15 compute laws for sort preservation and order, tree conversion, budgets, and simulation invariants. Ten numeric laws cover initial bounds, guarded accumulation, rejection preservation, untouched fields, reset, word-state bounds, and count exhaustion. The laws connect to production pure helpers rather than standalone example algorithms.
+
+`tests/compiler/compute-laws.test.ts` and `tests/compiler/numeric-laws.test.ts` require `ALL PROOFS CHECK`, inspect translated law names, and reject missing or false laws for the intended diagnostics. The numeric proof covers the pure Nat transition invoked by production helpers; it does not prove native U32 conversions or all 48-bit Nat operations.
+
+Pure proofs do not establish foreign C effects, framing, sockets, filesystem behavior, scheduling, or GPU execution. Those requirements have independent runtime fixtures. F32 values cross the wire as `U32` bits, including NaN, infinities, and signed zero, rather than JSON numbers.
+
+## CUDA status
+
+Production CPU-only and CUDA-linked compute variants build and pass independent CPU fallback references for sum, sort, 256 rendered pixels, and 512 sample bit patterns. The direct local CUDA build uses Clang `19.1.1` and CUDA `13.1`. CUDA-linked workers require CUDA shared libraries even with `--gpu off`.
+
+On the current WSL2 host, `--gpu-build` exits zero without producing a matching `compute-worker-cuda.gpu`. Explicit `--gpu on` rejects the device because it lacks concurrent managed access. The probe reports `unavailable`; a required GPU run exits 1, and packaging fails. These observations establish compilation and fallback, not GPU execution or a deployable CUDA package.
+
+Compute-only HTTP GPU admission is implemented. The gateway owner's `gpuEvidence` option or `BENDFLOW_GPU_EVIDENCE` selects a report validated against current source, host, toolchain, artifact hashes, and synchronized kernel diagnostics. Only verified evidence enables the GPU capability and worker selection. Unavailable or stale evidence rejects admission before spawn, with no silent fallback. Graphics and audio capabilities are excluded.
+
+The remaining work is actual production CUDA execution on a compatible native Linux NVIDIA machine, synchronized device evidence, a matching artifact, and passing package and full completion checks.
+
+### CUDA builds and artifacts
+
+`scripts/build/cuda.ts` requires Linux x64, Node 24, a clean pinned Bend checkout, Clang 19 or newer, and a CUDA toolkit. `CUDA_CC` overrides `.toolchain/clang/usr/bin/clang-19`. `CUDA_HOME` or `CUDA_PATH` overrides the local `.toolchain/cuda` toolkit. The build accepts `SOURCE_ROOT OUTPUT_DIRECTORY` as two optional positional arguments and defaults to `build/cuda`.
+
+| Output | Purpose |
+| --- | --- |
+| `compute-worker-cpu` | CPU-only executable built from `bend/compute-worker.bend` |
+| `compute-worker-cuda` | CUDA-linked executable built from `bend/compute-gpu-worker.bend` |
+| Matching `.c` files | Generated host code, with CUDA execution instrumentation in the CUDA variant |
+| `build.json` | Toolchain, source fingerprint, commands, dependency observations, artifact hashes, and device-build outcome |
+| `fallback.json` | Independent CPU-only and CUDA-linked fallback results |
+| `profile.json` | Host, toolchain, environment, fixtures, commands, artifact hashes, and device execution outcome |
+| `packaging.json` | Matching artifact and runtime-library checks |
+
+Both executables must pass fallback with explicit `--gpu off` before the build command succeeds. The fixture checks a 32-item wrapping sum and sort, then seven simulation steps, a 256-pixel quadtree frame, and 512 sample bit patterns through pages.
+
+The device artifact must be named `compute-worker-cuda.gpu` beside the CUDA executable. Its eight-byte runtime key must match runtime diagnostics, and its payload must begin with an ELF cubin header. Missing or stale artifacts, runtime device faults, changed hashes, and missing execution evidence fail verification. The artifact depends on device configuration; regenerate and verify the pair on each target runner.
+
+The CUDA executable requires `libcuda.so.1` and `libnvrtc.so.12` or `libnvrtc.so.13`, even with GPU disabled. Deployment also requires the NVIDIA driver, NVRTC compiler dependencies, libc, and libm. Recorded `ldd` output identifies host dependencies. Keep the CPU-only variant available for hosts without CUDA libraries.
+
+### Device evidence and completion policy
+
+Instrumentation changes generated host C only; the pinned compiler checkout stays clean. The build rejects changed runtime hooks. After CUDA context creation and the managed-memory capability check, it records device name, driver version, and runtime artifact key. Successful `cuLaunchKernel` calls followed by `cuCtxSynchronize` increase a cumulative kernel counter reported at GPU evaluation completion.
+
+Each sum, sort, rendering, and samples workload must produce a positive counter increment and match its independent reference. CPU fallback must produce no CUDA kernel evidence. The runner waits for complete diagnostics because TCP replies and stderr use separate streams. Counters cannot move backwards. They prove synchronized kernel execution, not speedup or useful-operation counts.
+
+The runner first uses explicit GPU startup without an application port to check capability. On a usable device this intentionally reaches the worker's usage error and exits 1. It then starts a real worker through `NativeApp` for workload verification. The capability probe alone is not execution evidence. Worker command records retain `status: null` because the public API does not expose an exit code; protocol assertions and completed shutdown establish the outcome.
+
+`scripts/conformance/hardware.ts` validates profile evidence against current source, host and kernel, the clean pinned compiler, Node, Bun, Bend, Clang, CUDA toolkit, fixtures, library resolution, artifact hashes, runtime key, and synchronized diagnostics. The source fingerprint covers `.bend` and `.ts` files under `bend`, `contracts`, `src`, and `scripts`. Source changes require a rebuild and fresh verification. Evidence is a local execution record, not an authenticated remote attestation.
+
+The test reporter includes a separate hardware result from `build/cuda/profile.json` when present. Current verified hardware evidence can satisfy the GPU requirement while inventory rows retain their original status. The validator never fabricates passing GPU tests. Failed inventory test references still block completion. Full completion requires both portable test verification and current verified GPU evidence.
+
+## Remaining CUDA acceptance
+
+On a native Linux NVIDIA runner with concurrent managed access:
+
+1. Reproduce portable setup and verification below.
+2. Run `npm run setup:cuda` and `npm run build:cuda`.
+3. Run `npm run conformance:cuda`, `npm run conformance:cuda:package`, and `npm run conformance:hardware`.
+4. Configure the gateway with `gpuEvidence` or `BENDFLOW_GPU_EVIDENCE` and check compute-only GPU session admission with explicit `--gpu on`.
+5. Run `npm test`, `npm run conformance:portable`, and `npm run conformance:full` to regenerate the report and require full acceptance.
+
+Acceptance requires correct outputs and device evidence for all four workloads, a matching packaged artifact, and agreement between inventory, capabilities, and the executed report. Native window and audio exclusions remain explicit. The current WSL2 host cannot satisfy this requirement.
+
+## Reproduction and completion checks
+
+Run portable setup and checks from the repository root:
 
 ```sh
-npx tsc --noEmit
-npm test
+	npm ci
+	npm run setup:bend
+	npm run setup:clang
+	npm run setup:lean
+	npm run typecheck
+	npm run check:compiler
+	npm test
+	npm run conformance:portable
 ```
 
-Correct pixels alone are not GPU evidence. Bend can run `!` calls on the CPU when GPU execution is unavailable. Explicit `--gpu on` rejects this WSL2 host because it lacks concurrent managed access. The `gpu` profile remains unavailable here until execution is tested on a compatible native Linux runner. The `graphics-audio` profile remains unavailable and its native window and audio effects are excluded from the agreed completion scope.
+The local Clang installer supports Ubuntu 24.04 x64; the Lean installer supports Linux x64 and verifies the official Lean 4.34.0 archive checksum. On other platforms, install matching tools directly. Build and test scripts select local tools through `PATH`. `CC` selects a different portable Clang. `LEAN_ARCHIVE` can supply an already-downloaded archive, which still must pass checksum validation.
 
-## Recommended strategy
+CUDA setup and checks are separate:
 
-Build Phase 2 as a Bend feature-conformance suite exercised through the Node gateway, using a small set of statically compiled, stateful applications.
-
-The key extension is an effectful transition:
-
-**`step : State × Command → IO(State × Reply)`**
-
-Pure commands can call pure helpers inside that transition. Effectful commands can operate on files, sockets, channels, or other resources, then return the updated state.
-
-This keeps the external interface familiar while exercising Bend's actual native capabilities:
-
-```text
-External client
-    → typed Node endpoint
-    → command decoding in native Bend
-    → stateful computation and effects
-    → updated native state + reply
-    → external client
-
-Independent test fixtures observe the effects.
+```sh
+	npm run setup:cuda
+	npm run build:cuda
+	npm run conformance:cuda:fallback
+	npm run conformance:cuda:probe
+	npm run conformance:cuda
+	npm run conformance:cuda:package
+	npm run conformance:hardware
+	npm run conformance:full
 ```
 
-This strategy comes from reviewing both Bend guides, relevant Base declarations, and upstream tests. At the time of review, GitHub's `main` resolves to `f0cf0a7c573145501981c44d9c33e326185f008e`, which matches BendFlow's pinned compiler revision.
+The underlying `gpu.ts` modes are `fallback`, `probe`, `required`, and `package`, each with an optional output directory. For example, `npm run conformance:cuda:probe -- build/cuda` selects a directory. `probe` exits zero for verified or unavailable hardware and nonzero for a failure. `required` exits nonzero for anything except verified GPU execution. Package checks require matching current verified evidence.
 
-## 1. Use several small session applications
+Completion commands accept `--report PATH` for the executed-test report. Full completion also accepts `--hardware-report PATH` and defaults to `build/cuda/profile.json`. Portable completion requires every CPU and compiler requirement to have executed passing evidence. Pending requirements keep development reports in progress, and deleting required rows cannot make the report complete.
 
-Group features into application-shaped sessions rather than creating an endpoint for every internal Base helper.
-
-Each session has its own affine state, a fixed command union, and typed replies. An external service creates a session, sends commands repeatedly, and closes it.
-
-| Session application | Commands to expose | Bend features exercised |
-| --- | --- | --- |
-| Numeric workbench | Calculate, convert, compare, accumulate | `Nat`, `U32`, `F32`, booleans, bit operations, arithmetic, parsing and formatting |
-| Collection workspace | Store records, transform lists, sort, edit arrays, update maps and sets | ADTs, nested records, tuples, `Maybe`, `Result`, recursion, folds, templates, higher-order functions, affine arrays |
-| File workspace | Open, read, write, append, inspect size, read and write at offsets, close | Persistent `File` ownership, text and binary IO, error handling |
-| Network session | Connect, send, receive, poll, close; bind and exchange datagrams | TCP, UDP, listeners, sockets, EOF, fragmentation, backpressure, timed operations |
-| Task session | Start bounded work, exchange channel messages, collect results | `IO.fork`, `IO.join`, `IO.spawn`, channels, timers, concurrency and ownership transfer |
-| Process and environment session | Read fixture environment, inspect arguments, run a fixed fixture program | Environment, arguments, random numbers, stdout and stderr, `Process.run`, exit and failure behavior |
-| Compute and rendering session | Parallel sum and sort, advance a simulation, render a frame, synthesize samples | CPU parallelism, GPU calls, arrays, `Image`, application state and event processing |
-| Custom-effect session | Invoke a compiled custom effect and retain its results | C effect registration, returned constructors, immediate effects, helper-thread work and parked IO |
-
-A capabilities endpoint identifies the compiled session kinds and available execution profiles. The commands remain ordinary, fixed application commands.
-
-No Bend closures, runtime types, native pointers, or descriptors cross the RPC boundary. Closures, templates, and polymorphism are exercised inside compiled handlers. Callers select named operations and supply data.
-
-## 2. Make affine resource persistence a central test
-
-The running-total experiment establishes state persistence, but its state contains only numbers. The next important test is state containing a real affine resource.
-
-For example:
-
-1. An external client opens a file through the gateway.
-2. Bend retains the `File` handle in session state.
-3. Another request writes through that handle.
-4. Another request reads or inspects it.
-5. The client closes it.
-6. A subsequent command using its resource ID receives an application error.
-
-The external client receives an opaque resource ID, not an OS descriptor.
-
-Base's `Map.pop` supports affine values, whereas `Map.get` requires copyable `Data` values. A resource table can therefore:
-
-- Remove the resource from the table.
-- Consume it in an operation.
-- Receive the returned handle alongside the operation result.
-- Reinsert it into the returned session state.
-- Omit reinsertion when explicitly closing it.
-
-Test error paths too. Bend's upstream `fail_keeps_handle.bend` demonstrates that a failed read can still return a usable file handle.
-
-Dropping an affine handle does not replace explicit resource cleanup. Session shutdown needs to close retained files, sockets, listeners, windows, and audio handles.
-
-## 3. Test observable behavior from outside Bend
-
-Each feature needs evidence stronger than an endpoint returning success.
-
-| Feature | Independent evidence |
-| --- | --- |
-| File writing | The test controller reads the actual file and checks its bytes |
-| TCP sending | A separate peer records the bytes received |
-| TCP receiving | A controlled peer sends fragmented data and closes at specified points |
-| UDP | A separate datagram peer checks payload and sender information |
-| Process execution | A fixture program reports its arguments, stdin, output and exit status |
-| Concurrency | Controlled channel handshakes establish ordering and completion |
-| Rendering | The external client checks returned pixels or a small reference image |
-| Custom effects | A fixture observes an actual external change or controlled native result |
-
-For every command family, test:
-
-- A successful request.
-- Boundary and malformed inputs.
-- A sequence of requests that demonstrates persistent state.
-- Failure followed by another valid command, where recovery is supported.
-- Session cleanup and isolation.
-
-Some tests use two independent client processes talking to the same session. Others use separate sessions to prove their states and resources do not interfere.
-
-## 4. Treat effect failures differently from pure failures
-
-A rejected pure operation can preserve its old state. An effectful operation may already have changed the external world before failing. A write may be partial, or a peer may receive data before the reply is lost.
-
-The tests distinguish:
-
-- Application results, such as overflow, a missing key, or a closed resource ID.
-- Effect failures, such as a refused connection, failed file operation, or process launch failure.
-- Infrastructure failures, such as worker death, RPC disconnect, or a hard deadline.
-- Uncertain completion, where an effect happened but its response was lost.
-
-Do not assume that an error means rollback. Test that state-changing commands are not automatically replayed after an uncertain outcome.
-
-### The `IO.within` constraint
-
-Both guides say that `IO.within` does not cancel its losing computation.
-
-Consequently, do not race a computation that consumes session state and then continue using the old state after timeout. The losing computation still owns its inputs and may still perform effects.
-
-For owned resources, prefer the available `try_*` operations, which return their ownership and results. For background jobs, transfer ownership into the job and collect it back through its completion result.
-
-Add a dedicated test that proves a late effect still occurs after an `IO.within` timeout.
-
-## 5. Expand the wire-format tests alongside feature coverage
-
-The current 248-byte payload limit is sufficient for the initial experiment but too small for realistic collections, files, and images.
-
-Phase 2 defines bounded payload sizes and explicit encodings for:
-
-- Nested records, unions, optional values and lists.
-- UTF-8 strings, Unicode characters and arbitrary bytes.
-- `Nat` values up to the native limit of **2⁴⁸ − 1**.
-- `U32` boundaries and wrapping arithmetic.
-- `F32`, including explicit representations for NaN, infinities and signed zero.
-- Array contents and resource IDs.
-
-For larger results, use bounded chunks or pages. Preserve the existing framing limits and rejection behavior as explicit protocol policies.
-
-Float tests need special care. The upstream limits document records differences between native and JavaScript behavior, including NaN payloads and formatting. Use native execution as the reference for those cases rather than blindly comparing JSON numbers.
-
-## 6. Separate runtime coverage from compiler coverage
-
-An HTTP request cannot directly verify erased arguments, termination rules, or proof checking. These remain important parts of Bend's capabilities.
-
-Run two complementary test groups.
-
-### Through the gateway
-
-Exercise compiled programs using:
-
-- Dependent structures, such as sized collections.
-- Concrete polymorphic instantiations.
-- Named template specializations.
-- Closures stored and consumed inside native state.
-- `Maybe` and `Result` monadic operations.
-- Parallel recursive computations.
-
-### At build time
-
-Require positive checks and expected failures for:
-
-- Duplicating affine state, arrays, handles, or closures.
-- Invalid erased-variable use.
-- Invalid template arguments.
-- Non-decreasing recursion.
-- Incorrect dependent-type inputs.
-- Missing or false laws.
-
-Keep proofs for the pure computational core separate from foreign effects. Use `--verdict` where applicable. A proof of the pure transition does not establish correctness of its C effect, framing, or external environment.
-
-## 7. Use explicit execution profiles
-
-Divide execution into:
-
-1. A required native CPU profile covering all portable computation, files, networking, processes, concurrency and custom C effects.
-2. A multithreaded CPU profile running the same parallel algorithms with different thread configurations.
-3. A GPU profile exercising actual Metal or CUDA execution on suitable machines.
-4. A graphics and audio profile reserved for future native window and audio coverage. Those effects are excluded from the agreed Phase 2 completion scope.
-
-Pure rendering and sample generation remain required and can be tested without devices. Actual `Window` and `Audio` effects would require separate configured environments if their scope is restored.
-
-Bend can run `!` calls on the CPU when GPU execution is unavailable. Correct output alone is therefore insufficient evidence that a GPU test ran on a GPU. That profile needs execution evidence from runtime or device instrumentation.
-
-Base currently has no built-in DNS, TLS, crypto, or complete HTTP implementation. Node supplies the public HTTP gateway. Track additional networking libraries or custom effects as extensions.
-
-## 8. Implementation order and acceptance criteria
-
-Implement in this order:
-
-1. Numeric and collection sessions, including serialization and persistent affine arrays.
-2. File sessions, proving handle ownership across requests and failures.
-3. TCP and UDP, tasks and channels, processes, and custom effects.
-4. Parallel compute, rendering, and hardware-dependent profiles.
-
-Maintain a machine-readable coverage inventory mapping each intended feature or API to its command, tests, execution profile, and evidence. Compiler-only features get compiler tests. Report unavailable profiles explicitly.
-
-Phase 2 is complete for the agreed scope when every supported portable feature and CUDA GPU feature has evidence, and every in-scope effect family has a real externally observed test. Native window and audio effects are excluded, not passed. Portable completion can be reported separately while CUDA runner verification remains outstanding.
-
-The next slice is restoring the conformance evidence paths, then bounded paging and complete codec vectors, followed by the missing numeric and collection features. The gateway and persistent-file HTTP path are implemented. Use the [completion plan](bend-node-phase2-completion-plan.md) and the feature inventory to select the next unverified requirement.
+The setup, native and CUDA build, compiler-check, test-runner, and conformance scripts remain required for reproducible verification and evidence-gated GPU admission. Their package commands are defined in `package.json`; build outputs and machine-specific reports are ignored by Git.
 
 ## Sources
 
@@ -280,4 +250,4 @@ The next slice is restoring the conformance evidence paths, then bounded paging 
 - [Runtime limits and intentional exclusions](https://github.com/bendlang/bend/blob/f0cf0a7c573145501981c44d9c33e326185f008e/WONTFIX.txt)
 - [Upstream effect tests](https://github.com/bendlang/bend/tree/f0cf0a7c573145501981c44d9c33e326185f008e/tests/io)
 - [Failed operations retain their handles](https://github.com/bendlang/bend/blob/f0cf0a7c573145501981c44d9c33e326185f008e/tests/io/fail_keeps_handle.bend)
-- [Non-cancelling `IO.within` behavior](https://github.com/bendlang/bend/blob/f0cf0a7c573145501981c44d9c33e326185f008e/tests/io/within.bend)
+- [Non-cancelling IO.within behavior](https://github.com/bendlang/bend/blob/f0cf0a7c573145501981c44d9c33e326185f008e/tests/io/within.bend)

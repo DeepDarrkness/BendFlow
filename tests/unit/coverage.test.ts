@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { loadInventory, validateInventory, evaluateInventory, type Inventory, type ObservedTest } from '../../scripts/conformance/inventory.ts';
 import { evaluateCompletion, parseCompletionArgs } from '../../scripts/conformance/completion.ts';
+import type { HardwareResult } from '../../scripts/conformance/hardware.ts';
 import { projectPath } from '../../src/paths.ts';
 
 function passingReferences(inventory: Inventory): ObservedTest[] {
@@ -109,9 +110,25 @@ test('full completion requires observed CUDA instrumentation as well as all port
       ? { profile: 'gpu', status: 'verified', tests: [ref], evidence: 'Controlled GPU fixture', deviceExecution: { backend: 'cuda', device: 'Controlled fixture', instrumentation: 'Device kernel observation', tests: [instrument] } } : row),
   });
   const observed = passingReferences(full);
+  const hardware = {
+    status: 'verified', report: 'controlled GPU hardware fixture', evidence: {
+      schemaVersion: 1, profile: 'gpu', status: 'verified', sourceSha256: 'a'.repeat(64),
+      host: { hostname: 'controlled', platform: 'linux', release: 'controlled' },
+      toolchain: { node: 'v24', revision: 'a'.repeat(40), clang: '19', cudaHome: '/controlled', cudaVersion: '13.1', bun: '1.3.3', bend: '2.0.40' },
+      commands: [], fixture: { sumItems: [1], renderDepth: 4, sampleCount: 512, phase: 7 },
+      setup: 'Controlled input, not actual hardware evidence', environment: { CC: 'clang', LD_LIBRARY_PATH: '', BENDRTS: '' },
+      artifact: { executable: '/controlled', executableSha256: 'a'.repeat(64), path: '/controlled.gpu', sha256: 'a'.repeat(64), runtimeKey: 'a'.repeat(16) },
+      instrumentation: { kind: 'runtime-cuda-synchronization', evidence: [
+        { workload: 'sum', synchronizedKernels: 5 }, { workload: 'sort', synchronizedKernels: 5 },
+        { workload: 'render', synchronizedKernels: 5 }, { workload: 'samples', synchronizedKernels: 5 },
+      ] },
+    },
+  } satisfies HardwareResult;
   assert.equal(evaluateCompletion(full, observed, 'full').completion, 'in-progress');
-  assert.equal(evaluateCompletion(full, [...observed, { ...instrument, status: 'passed' }], 'full').completion, 'full-complete');
-  assert.equal(evaluateCompletion(full, [...observed, { ...instrument, status: 'skipped' }], 'full').completion, 'in-progress');
+  assert.equal(evaluateCompletion(full, [...observed, { ...instrument, status: 'passed' }], 'full').completion, 'in-progress');
+  assert.equal(evaluateCompletion(full, [...observed, { ...instrument, status: 'passed' }], 'full', hardware).completion, 'full-complete');
+  assert.equal(evaluateCompletion(full, [...observed, { ...instrument, status: 'skipped' }], 'full', hardware).completion, 'in-progress');
+  assert.equal(evaluateCompletion(full, observed, 'full', hardware).completion, 'in-progress');
 });
 
 test('completion CLI requires an explicit valid mode and rejects stale completion claims', async t => {

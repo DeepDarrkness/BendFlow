@@ -3,7 +3,9 @@ import test from 'node:test';
 import { nativeProbe, prefixes, type NativeReply } from '../fixtures/codecs/probe.ts';
 import { collectionCodec, fileCodec, taskCodec, processCodec, computeCodec, networkCodec, customCodec, numericCodec } from '../../src/protocol/apps.ts';
 import { encodeCommand, decodeReply } from '../../src/protocol/session.ts';
-import { app, session } from '../support/native.ts';
+import { worker } from '../support/native.ts';
+import { SESSION_CONTRACT, STEP_OPERATION } from '../../src/protocol/session.ts';
+import { projectPath } from '../../src/paths.ts';
 
 const unit = 'Loop.ok()';
 const invalid = 'Loop.invalid()';
@@ -25,8 +27,8 @@ test('session native golden commands, replies and every malformed prefix agree i
   const output = nativeProbe({ name: 'session', module: 'session-worker', parser: 'App.decode_command',
     imports: 'import ../../bend/session.bend as Session', commands, replies, malformed: ['ff', '03'] });
   check(output, commands, replies, encodeCommand, decodeReply);
-  const native = await session(t);
-  assert.deepEqual(await native.raw(Buffer.from([255])), Buffer.from([2]));
+  const native = await worker(t, { executable: projectPath('build/session-worker'), contract: SESSION_CONTRACT });
+  assert.deepEqual(await native.call(STEP_OPERATION, Buffer.from([255])), Buffer.from([2]));
 });
 
 function check<C, R>(output: string[], commands: readonly { command: C; hex: string }[], replies: readonly NativeReply[],

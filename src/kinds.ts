@@ -21,7 +21,7 @@ export function capabilities() {
     kinds: SESSION_KINDS.map(kind => ({ kind, contract: KIND_CODECS[kind].contract })),
     profiles: PROFILES.map(profile => {
       if (profile === 'gpu') return { profile, status: 'unavailable' as const, reason: 'No configured GPU execution instrumentation' };
-      if (profile === 'graphics-audio') return { profile, status: 'unavailable' as const, reason: 'No configured display or audio capture fixture' };
+      if (profile === 'graphics-audio') return { profile, status: 'excluded' as const, scope: 'phase2', reason: 'Native window and audio effects are excluded from the agreed Phase 2 scope' };
       return { profile, status: 'available' as const };
     }),
   };

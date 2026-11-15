@@ -53,7 +53,17 @@ export async function startAppGateway(options: ConstructorParameters<typeof AppS
   const server = createServer((request, response) => {
     if (request.method === 'GET' && request.url === '/capabilities') {
       response.setHeader('content-type', 'application/json');
-      response.end(JSON.stringify(capabilities()));
+      const available = capabilities();
+      const hardware = sessions.gpuHardware;
+      response.end(JSON.stringify({
+        ...available,
+        profiles: available.profiles.map(row => row.profile === 'gpu' && hardware?.status === 'verified'
+          ? { profile: 'gpu', status: 'available', scope: 'sessions', kinds: ['compute'], evidence: hardware.report }
+          : row.profile === 'gpu' && hardware
+            ? { ...row, reason: 'Configured GPU hardware evidence is not verified' }
+            : row),
+        ...(hardware ? { hardware } : {}),
+      }));
       return;
     }
     void handler.handle(request, response, { prefix: '/rpc' }).then(({ matched }) => {

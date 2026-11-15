@@ -16,7 +16,8 @@ export const clang = configuredClang
 export const environment = {
   ...process.env, BEND_NO_TELEMETRY: '1', CC: clang,
   CUDA_HOME: cuda,
-  PATH: [projectPath('.toolchain/clang/usr/bin'), cuda ? `${cuda}/bin` : undefined, process.env.PATH].filter(Boolean).join(':'),
+  PATH: [projectPath('.toolchain/clang/usr/bin'), cuda ? `${cuda}/bin` : undefined,
+    projectPath('.toolchain/lean/bin'), process.env.PATH].filter(Boolean).join(':'),
   LIBRARY_PATH: [existsSync('/usr/lib/wsl/lib/libcuda.so') ? '/usr/lib/wsl/lib' : undefined, process.env.LIBRARY_PATH].filter(Boolean).join(':'),
   LD_LIBRARY_PATH: [projectPath('.toolchain/clang/usr/lib/x86_64-linux-gnu'), cuda ? `${cuda}/lib` : undefined,
     cuda ? `${cuda}/lib64` : undefined, process.env.LD_LIBRARY_PATH].filter(Boolean).join(':'),

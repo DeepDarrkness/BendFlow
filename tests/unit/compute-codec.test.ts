@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { computeCodec } from '../../src/protocol/codecs/compute.ts';
-import { computeCommandSchema, type ComputeCommand, type ComputeReply } from '../../contracts/compute.ts';
+import { computeCommandSchema, computeReplySchema, type ComputeCommand, type ComputeReply } from '../../contracts/compute.ts';
 import { BytesWriter } from '../../src/protocol/bytes.ts';
+import { collectionCodec } from '../../src/protocol/codecs/collection.ts';
+import { fileCodec } from '../../src/protocol/codecs/file.ts';
 
 test('compute codec command golden vectors cover every command and declared event', () => {
   const vectors: [ComputeCommand, string][] = [
@@ -29,6 +31,8 @@ test('compute codec reply golden vectors enforce all metadata and variants', () 
   for (const [hex, reply] of vectors) {
     const raw = Buffer.from(hex, 'hex');
     assert.deepEqual(computeCodec.decode(raw), reply);
+    if (reply.kind === 'snapshot' || reply.kind === 'page') assert.deepEqual(collectionCodec.decode(raw), reply);
+    if (reply.kind === 'snapshot') assert.deepEqual(fileCodec.decode(raw), reply);
     assert.throws(() => computeCodec.decode(Buffer.concat([raw, Buffer.from([0])])));
     for (let i = 0; i < raw.length; i++) assert.throws(() => computeCodec.decode(raw.subarray(0, i)));
   }
@@ -47,4 +51,10 @@ test('compute contract rejects one-over bounds, invalid IDs, booleans and extra 
     { kind: 'page', snapshot: 0, offset: 0, max: 32 }, { kind: 'page', snapshot: 1, offset: 0, max: 0 },
     { kind: 'page', snapshot: 1, offset: 0, max: 33 }, { kind: 'release', snapshot: 0 },
     { kind: 'event', event: { kind: 'focus', on: 1 } }, { kind: 'inspect', extra: true }]) assert.equal(computeCommandSchema.safeParse(input).success, false);
+  for (const input of [{ kind: 'captured', snapshot: 1, total: 0 }, { kind: 'snapshot', snapshot: 1, total: 513 },
+    { kind: 'page', snapshot: 1, offset: 0, total: 0, count: 0, done: true, items: [] },
+    { kind: 'page', snapshot: 1, offset: 0, total: 1, count: 1, done: true, data: [-1] },
+    { kind: 'page', snapshot: 1, offset: 0, total: 0, count: 0, done: true, data: [], extra: true }]) {
+    assert.equal(computeReplySchema.safeParse(input).success, false);
+  }
 });

@@ -2,7 +2,9 @@ import { randomUUID } from 'node:crypto';
 import { NativeApp, type AppCodec } from './app.ts';
 import { KIND_CODECS, kindExecutable, type SessionKind } from './kinds.ts';
 import { sessionIdSchema, type SessionId, type CreateSession } from '../contracts/apps.ts';
-import type { WorkerOptions } from './worker.ts';
+import { WorkerError, type WorkerOptions } from './worker.ts';
+import { readHardware } from '../scripts/conformance/hardware.ts';
+import { environment } from '../scripts/lib/toolchain.ts';
 
 type OwnedApp = {
   pid: number;
@@ -35,17 +37,21 @@ export class AppSessions {
   #shutdown: Promise<void> | undefined;
   #worker: Omit<WorkerOptions, 'contract' | 'executable' | 'profile' | 'threads'>;
   #maxSessions: number;
+  #gpuEvidence: string | undefined;
 
   constructor(options: {
     maxSessions?: number;
+    gpuEvidence?: string;
     worker?: Omit<WorkerOptions, 'contract' | 'executable' | 'profile' | 'threads'>;
   } = {}) {
     this.#maxSessions = options.maxSessions ?? 16;
     if (!Number.isInteger(this.#maxSessions) || this.#maxSessions < 1) throw new RangeError('Invalid session limit');
     this.#worker = options.worker ?? {};
+    this.#gpuEvidence = options.gpuEvidence ?? process.env.BENDFLOW_GPU_EVIDENCE;
   }
 
   get workerPids(): number[] { return [...this.#sessions.values()].map(row => row.app.pid); }
+  get gpuHardware() { return this.#gpuEvidence ? readHardware(this.#gpuEvidence) : undefined; }
 
   create(input: CreateSession) {
     if (this.#shutdown) throw new SessionLookupError('Gateway is shutting down');
@@ -60,8 +66,17 @@ export class AppSessions {
 
   async #create(input: CreateSession) {
     const { execution, kind } = input;
+    let executable = kindExecutable(kind);
+    let env = this.#worker.env;
+    if (execution.profile === 'gpu') {
+      if (kind !== 'compute') throw new WorkerError('UNAVAILABLE', 'GPU execution supports only compute sessions');
+      const hardware = this.gpuHardware;
+      if (hardware?.status !== 'verified') throw new WorkerError('UNAVAILABLE', 'GPU execution requires current verified hardware evidence');
+      executable = hardware.evidence.artifact.executable;
+      env = { ...env, ...environment };
+    }
     const app = await factories[kind]({
-      ...this.#worker, executable: kindExecutable(kind), profile: execution.profile,
+      ...this.#worker, executable, env, profile: execution.profile,
       threads: execution.profile === 'multithreaded-cpu' ? execution.threads : 1,
     });
     const sessionId = sessionIdSchema.parse(randomUUID());

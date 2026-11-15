@@ -20,4 +20,5 @@ export const compilerCheckTargets = [
   { input: projectPath('tests/fixtures/collection-file/positive.bend'), gate: '--check-only' },
   { input: projectPath('tests/fixtures/phase2/task-resource-positive.bend'), gate: '--check-only' },
   { input: projectPath('bend/compute-proof.bend'), gate: '--verdict' },
+  { input: projectPath('bend/numeric-proof.bend'), gate: '--verdict' },
 ];
