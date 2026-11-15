@@ -19,6 +19,12 @@ export const networkCodec = validatedCodec<NetworkCommand, NetworkReply>({
       case 'bind': return out.u8(4).text(command.host, 64).u32(command.port).toBuffer();
       case 'sendTo': return out.u8(5).u32(command.id).text(command.host, 64).u32(command.port).bytes(command.bytes, 96).toBuffer();
       case 'recvFrom': return out.u8(6).u32(command.id).u32(command.max).u32(command.ms).toBuffer();
+      case 'listen': return out.u8(7).text(command.host, 64).u32(command.port).toBuffer();
+      case 'accept': return out.u8(8).u32(command.id).toBuffer();
+      case 'tryAccept': return out.u8(9).u32(command.id).u32(command.ms).toBuffer();
+      case 'tryRecv': return out.u8(10).u32(command.id).u32(command.max).u32(command.ms).toBuffer();
+      case 'trySend': return out.u8(11).u32(command.id).bytes(command.bytes).u32(command.ms).toBuffer();
+      case 'trySendTo': return out.u8(12).u32(command.id).text(command.host, 64).u32(command.port).bytes(command.bytes, 96).u32(command.ms).toBuffer();
     }
   },
   decode(payload) {
@@ -39,6 +45,10 @@ export const networkCodec = validatedCodec<NetworkCommand, NetworkReply>({
       return { kind: 'dgram', host, port, bytes };
     }
     if (tag === 7) { reader.finish(); return { kind: 'timeout' }; }
+    if (tag === 8) { const code = reader.u32(); const unsent = reader.bytes(); reader.finish(); return { kind: 'sendFailure', code, unsent }; }
+    if (tag === 9) { const unsent = reader.bytes(); reader.finish(); return { kind: 'sendTimeout', unsent }; }
+    if (tag === 10) { reader.finish(); return { kind: 'wrongResource' }; }
+    if (tag === 11) { reader.finish(); return { kind: 'exhausted' }; }
     throw new ProtocolError('Malformed network result');
   },
 }, networkReplySchema);

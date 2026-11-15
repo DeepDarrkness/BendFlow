@@ -17,6 +17,12 @@ export const networkCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('bind'), host, port }),
   z.strictObject({ kind: z.literal('sendTo'), id: resourceId, host, port: port.min(1), bytes: bytes(96) }),
   z.strictObject({ kind: z.literal('recvFrom'), id: resourceId, max: readSize.min(1), ms: milliseconds }),
+  z.strictObject({ kind: z.literal('listen'), host, port }),
+  z.strictObject({ kind: z.literal('accept'), id: resourceId }),
+  z.strictObject({ kind: z.literal('tryAccept'), id: resourceId, ms: milliseconds }),
+  z.strictObject({ kind: z.literal('tryRecv'), id: resourceId, max: readSize.min(1), ms: milliseconds }),
+  z.strictObject({ kind: z.literal('trySend'), id: resourceId, bytes: data, ms: milliseconds }),
+  z.strictObject({ kind: z.literal('trySendTo'), id: resourceId, host, port: port.min(1), bytes: bytes(96), ms: milliseconds }),
 ]);
 
 export const networkReplySchema = z.discriminatedUnion('kind', [
@@ -25,6 +31,10 @@ export const networkReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('eof') }),
   z.strictObject({ kind: z.literal('dgram'), host, port, bytes: data }),
   z.strictObject({ kind: z.literal('timeout') }),
+  z.strictObject({ kind: z.literal('sendFailure'), code: u32, unsent: data }),
+  z.strictObject({ kind: z.literal('sendTimeout'), unsent: data }),
+  z.strictObject({ kind: z.literal('wrongResource') }),
+  z.strictObject({ kind: z.literal('exhausted') }),
 ]);
 
 export type NetworkCommand = z.infer<typeof networkCommandSchema>;

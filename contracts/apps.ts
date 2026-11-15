@@ -35,7 +35,7 @@ export const commandKinds = {
   task: taskCommandSchema.options.map(option => option.shape.kind.value),
   process: processCommandSchema.options.map(option => option.shape.kind.value),
   compute: computeCommandSchema.options.map(option => option.shape.kind.value),
-  custom: [customCommandSchema.shape.kind.value],
+  custom: customCommandSchema.options.map(option => option.shape.kind.value),
 };
 
 function sessionCommand<Command, Reply>(command: z.ZodType<Command>, reply: z.ZodType<Reply>) {

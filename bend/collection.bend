@@ -1,8 +1,13 @@
 import Base
 import ./bytes.bend as Bytes
+import ./pages.bend as Pages
+import ./collection-features.bend as Features
+
+type CoreState is Type:
+  Workspace{records: Map<&2, String>, items: List<&2, U32>, cells: Array<U32>}
 
 type State is Type:
-  Workspace{records: Map<&2, String>, items: List<&2, U32>, cells: Array<U32>}
+  State{core: CoreState, snapshot: Pages.Snapshot, features: Features.State}
 
 type Command is Data:
   Put{key: String, value: String}
@@ -13,14 +18,19 @@ type Command is Data:
   Sort{}
   ArraySet{index: U32, value: U32}
   ArrayGet{index: U32}
+  ArrayRead{}
   Read{}
+  AppendItems{items: List<&2, U32>}
+  Capture{}
+  Paging{request: Pages.Request}
+  Feature{command: Features.Command}
 
 type InsertJob is Data:
   InsertNeed{x: U32, xs: List<&2, U32>}
   InsertCmp{ok: Bool, x: U32, h: U32, t: List<&2, U32>}
 
 def initial() -> State:
-  Workspace{Map.new(&2, String), [], Array.new(U32, 2n, 0)}
+  State{Workspace{Map.new(&2, String), [], Array.new(U32, 2n, 0)}, Pages.initial(), Features.initial()}
 
 def inc(n: U32) -> U32:
   (n + 1 : U32)
@@ -38,7 +48,11 @@ def map_inc(xs: List<&2, U32>) -> List<&2, U32>:
 def insert.go(fuel: Nat, job: InsertJob) -> List<&2, U32>:
   match fuel:
     case 0n:
-      []
+      match job:
+        case InsertNeed{x, xs}:
+          x <> xs
+        case InsertCmp{ok, x, h, t}:
+          x <> h <> t
     case 1n+p:
       match job:
         case InsertNeed{+x, xs}:
@@ -54,8 +68,8 @@ def insert.go(fuel: Nat, job: InsertJob) -> List<&2, U32>:
             case False{}:
               h <> insert.go(p, InsertNeed{x, t})
 
-def insert(x: U32, xs: List<&2, U32>) -> List<&2, U32>:
-  insert.go(64n, InsertNeed{x, xs})
+def insert(x: U32, +xs: List<&2, U32>) -> List<&2, U32>:
+  insert.go(Nat.add(Nat.mul(List.length(&2, U32, xs), 2n), 2n), InsertNeed{x, xs})
 
 def sort.go(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
   match xs:
@@ -67,8 +81,15 @@ def sort.go(xs: List<&2, U32>, acc: List<&2, U32>) -> List<&2, U32>:
 def sort(xs: List<&2, U32>) -> List<&2, U32>:
   sort.go(xs, [])
 
-def encode_items(tag: U32, items: List<&2, U32>) -> List<&2, U32>:
-  tag <> Bytes.encode_u32s(items)
+def encode_items.checked(ok: Bool, tag: U32, items: List<&2, U32>) -> List<&2, U32>:
+  match ok:
+    case True{}:
+      tag <> Bytes.encode_u32s(items)
+    case False{}:
+      [0]
+
+def encode_items(tag: U32, +items: List<&2, U32>) -> List<&2, U32>:
+  encode_items.checked(U32.is_le(Pages.length(items), 32), tag, items)
 
 def encode_text(tag: U32, text: String) -> List<&2, U32>:
   tag <> Bytes.encode_text(text)
@@ -86,7 +107,7 @@ def got_value(found: Bool, value: String) -> List<&2, U32>:
     case True{}:
       encode_text(1, value)
 
-def after_get(+key: String, items: List<&2, U32>, cells: Array<U32>, got: Map<&2, String> & Maybe<&2, String>) -> State & List<&2, U32>:
+def after_get(+key: String, items: List<&2, U32>, cells: Array<U32>, got: Map<&2, String> & Maybe<&2, String>) -> CoreState & List<&2, U32>:
   (kept, value) = got
   match value:
     case None{}:
@@ -94,7 +115,7 @@ def after_get(+key: String, items: List<&2, U32>, cells: Array<U32>, got: Map<&2
     case Some{+text}:
       (Workspace{Map.set(&2, String, kept, key, text), items, cells}, encode_text(1, text))
 
-def after_del(items: List<&2, U32>, cells: Array<U32>, got: Map<&2, String> & Maybe<&2, String>) -> State & List<&2, U32>:
+def after_del(items: List<&2, U32>, cells: Array<U32>, got: Map<&2, String> & Maybe<&2, String>) -> CoreState & List<&2, U32>:
   (kept, value) = got
   match value:
     case None{}:
@@ -102,11 +123,22 @@ def after_del(items: List<&2, U32>, cells: Array<U32>, got: Map<&2, String> & Ma
     case Some{text}:
       (Workspace{kept, items, cells}, encode_text(3, text))
 
-def array_get_at(records: Map<&2, String>, items: List<&2, U32>, got: Array<U32> & U32) -> State & List<&2, U32>:
+def array_get_at(records: Map<&2, String>, items: List<&2, U32>, got: Array<U32> & U32) -> CoreState & List<&2, U32>:
   (cells, value) = got
   (Workspace{records, items, cells}, encode_u32(4, value))
 
-def step(state: State, command: Command) -> State & List<&2, U32>:
+def reusable_items(items: List<U32>) -> List<&2, U32>:
+  match items:
+    case Nil{}:
+      []
+    case h <> t:
+      h <> reusable_items(t)
+
+def array_read_at(records: Map<&2, String>, items: List<&2, U32>, got: Array<U32> & Array<U32>) -> CoreState & List<&2, U32>:
+  (cells, copy) = got
+  (Workspace{records, items, cells}, encode_items(5, reusable_items(Array.to_list(~U32, copy))))
+
+def core_step(state: CoreState, command: Command) -> CoreState & List<&2, U32>:
   match state command:
     case Workspace{records, items, cells} Put{+key, value}:
       (Workspace{put_record(records, key, value), items, cells}, [0])
@@ -126,8 +158,47 @@ def step(state: State, command: Command) -> State & List<&2, U32>:
       (Workspace{records, items, Array.set(U32, cells, index, value)}, [0])
     case Workspace{records, items, cells} ArrayGet{index}:
       array_get_at(records, items, Array.get(U32, cells, index))
+    case Workspace{records, items, cells} ArrayRead{}:
+      array_read_at(records, items, Array.clone(U32, cells))
     case Workspace{records, +items, cells} Read{}:
       (Workspace{records, items, cells}, encode_items(5, items))
+    case core other:
+      (core, [255])
+
+def append_checked(ok: Bool, records: Map<&2, String>, +items: List<&2, U32>, cells: Array<U32>, more: List<&2, U32>) -> CoreState & List<&2, U32>:
+  match ok:
+    case False{}:
+      (Workspace{records, items, cells}, [10])
+    case True{}:
+      +next = List.append(&2, U32, items, more)
+      (Workspace{records, next, cells}, encode_items(5, next))
+
+def after_snapshot(core: CoreState, features: Features.State, got: Pages.Snapshot & List<&2, U32>) -> State & List<&2, U32>:
+  (kept, reply) = got
+  (State{core, kept, features}, reply)
+
+def after_core(snapshot: Pages.Snapshot, features: Features.State, got: CoreState & List<&2, U32>) -> State & List<&2, U32>:
+  (kept, reply) = got
+  (State{kept, snapshot, features}, reply)
+
+def after_features(core: CoreState, snapshot: Pages.Snapshot, got: Features.State & List<&2, U32>) -> State & List<&2, U32>:
+  (features, reply) = got
+  (State{core, snapshot, features}, reply)
+
+def step(state: State, command: Command) -> State & List<&2, U32>:
+  match state command:
+    case State{Workspace{records, +items, cells}, snapshot, features} Capture{}:
+      after_snapshot(Workspace{records, items, cells}, features, Pages.capture(snapshot, items))
+    case State{core, snapshot, features} Paging{Pages.Page{token, offset, max}}:
+      after_snapshot(core, features, Pages.page(~(xs => Bytes.encode_u32s(xs)), snapshot, token, offset, max))
+    case State{core, snapshot, features} Paging{Pages.Release{token}}:
+      after_snapshot(core, features, Pages.release(snapshot, token))
+    case State{Workspace{records, +items, cells}, snapshot, features} AppendItems{+more}:
+      after_core(snapshot, features, append_checked(U32.is_le((Pages.length(items) + Pages.length(more) : U32), 1024), records, items, cells, more))
+    case State{Workspace{records, +items, cells}, snapshot, features} Feature{command}:
+      after_features(Workspace{records, items, cells}, snapshot, Features.step(features, command, items))
+    case State{core, snapshot, features} command:
+      after_core(snapshot, features, core_step(core, command))
 
 def finish_put(ok: Bool, key: String, value: String) -> Maybe<&2, Command>:
   match ok:
@@ -227,6 +298,25 @@ def take_aget(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
     case Some{Bytes.SplitU32{index, more}}:
       finish_aget(Bytes.finished(more), index)
 
+def take_append(got: Maybe<&2, Bytes.SplitU32s>) -> Maybe<&2, Command>:
+  match got:
+    case None{}:
+      None{}
+    case Some{Bytes.SplitU32s{items, more}}:
+      do Maybe<&2, Command>:
+        valid : Unit <- Pages.valid_unit(Bytes.finished(more))
+        return AppendItems{items}
+
+def take_paging(got: Maybe<&2, Pages.Request>) -> Maybe<&2, Command>:
+  do Maybe<&2, Command>:
+    request : Pages.Request <- got
+    return Paging{request}
+
+def take_feature(got: Maybe<&2, Features.Command>) -> Maybe<&2, Command>:
+  do Maybe<&2, Command>:
+    command : Features.Command <- got
+    return Feature{command}
+
 def take_command(payload: List<&2, U32>) -> Maybe<&2, Command>:
   match payload:
     case 0 <> rest:
@@ -247,5 +337,15 @@ def take_command(payload: List<&2, U32>) -> Maybe<&2, Command>:
       take_aget(Bytes.take_u32(rest))
     case [8]:
       Some{Read{}}
+    case [23]:
+      Some{ArrayRead{}}
+    case 9 <> rest:
+      take_append(Bytes.take_u32s(32, rest))
+    case [10]:
+      Some{Capture{}}
+    case 11 <> rest:
+      take_paging(Pages.parse_page(32, rest))
+    case 12 <> rest:
+      take_paging(Pages.parse_release(rest))
     case other:
-      None{}
+      take_feature(Features.parse(other))

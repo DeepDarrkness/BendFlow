@@ -1,6 +1,7 @@
 import Base
 import ./loop.bend as Loop
 import ./compute-app.bend as Compute
+import ./compute-core.bend as Core
 
 def contract(_: Unit) -> List<&2, U32>:
   [66, 101, 110, 100, 70, 108, 111, 119, 47, 99, 111, 109, 112, 117, 116, 101, 47, 118, 49]
@@ -13,7 +14,7 @@ def applied(state: Compute.State, command: Maybe<&2, Compute.Command>) -> IO(Com
     case None{}:
       IO.pure(Compute.State & List<&2, U32>, (state, Loop.invalid()))
     case Some{cmd}:
-      Compute.step(state, cmd)
+      Compute.step(~Core.sum, ~Core.sort, ~Core.image, ~Core.buffer, state, cmd)
 
 def handle_other(state: Compute.State) -> IO(Compute.State & List<&2, U32>):
   IO.pure(Compute.State & List<&2, U32>, (state, Loop.ok()))

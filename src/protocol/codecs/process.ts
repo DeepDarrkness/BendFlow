@@ -16,6 +16,7 @@ export const processCodec = validatedCodec<ProcessCommand, ProcessReply>({
       case 'args': return out.u8(1).toBuffer();
       case 'run': return out.u8(2).text(command.program).text(command.arg, 64).text(command.input, 64).toBuffer();
       case 'random': return out.u8(3).toBuffer();
+      case 'fixture': return out.u8(4).u8(['report', 'success', 'timeout', 'overflow'].indexOf(command.behavior)).text(command.arg, 32).text(command.input, 32).toBuffer();
     }
   },
   decode(payload) {

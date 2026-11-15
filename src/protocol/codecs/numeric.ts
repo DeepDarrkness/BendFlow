@@ -1,11 +1,12 @@
 import {
   numericCommandSchema, numericReplySchema, type NumericCommand, type NumericReply,
+  arithmeticOps, comparisonOps, bitOps, conversionOps,
 } from '../../../contracts/numeric.ts';
 import { BytesReader, BytesWriter, natText, parseNatText } from '../bytes.ts';
 import { validatedCodec } from '../codec.ts';
 import { ProtocolError } from '../framing.ts';
 
-const ORDER = ['lt', 'eq', 'gt'] as const;
+const ORDER: ('lt' | 'eq' | 'gt')[] = ['lt', 'eq', 'gt'];
 
 function snapshot(reader: BytesReader) {
   return { nat: natText(reader.nat()), total: reader.u32(), count: reader.u32(), f32Bits: reader.u32() };
@@ -27,7 +28,21 @@ export const numericCodec = validatedCodec<NumericCommand, NumericReply>({
       case 'show': return out.u8(5).toBuffer();
       case 'f32Add': return out.u8(6).u32(command.left).u32(command.right).toBuffer();
       case 'compare': return out.u8(7).nat(parseNatText(command.left)).nat(parseNatText(command.right)).toBuffer();
-      case 'bits': return out.u8(8).u8(command.op).u32(command.left).u32(command.right).toBuffer();
+      case 'bits': return out.u8(8).u8(typeof command.op === 'number' ? command.op : bitOps.indexOf(command.op)).u32(command.left).u32(command.right).toBuffer();
+      case 'calculate':
+      case 'compareNumber': {
+        out.u8(command.kind === 'calculate' ? 9 : 11)
+          .u8(['nat', 'u32', 'f32'].indexOf(command.domain))
+          .u8(command.kind === 'calculate' ? arithmeticOps.indexOf(command.op) : comparisonOps.indexOf(command.op));
+        return command.domain === 'nat'
+          ? out.nat(parseNatText(command.left)).nat(parseNatText(command.right)).toBuffer()
+          : out.u32(command.left).u32(command.right).toBuffer();
+      }
+      case 'convert': {
+        out.u8(10).u8(conversionOps.indexOf(command.op));
+        return typeof command.value === 'string' ? out.nat(parseNatText(command.value)).toBuffer() : out.u32(command.value).toBuffer();
+      }
+      case 'bool': return out.u8(12).u8(['and', 'or', 'xor', 'not'].indexOf(command.op)).u8(Number(command.left)).u8(Number(command.right)).toBuffer();
     }
   },
   decode(payload) {
@@ -55,6 +70,20 @@ export const numericCodec = validatedCodec<NumericCommand, NumericReply>({
       const value = reader.u32();
       reader.finish();
       return { kind: 'bits', value };
+    }
+    if (tag === 8) {
+      const value = natText(reader.nat()); reader.finish(); return { kind: 'nat', value };
+    }
+    if (tag === 9) {
+      const value = reader.u8();
+      if (value > 1) throw new ProtocolError('Malformed numeric boolean');
+      reader.finish(); return { kind: 'bool', value: value === 1 };
+    }
+    if (tag === 10) {
+      const reasons: ('overflow' | 'divisionByZero' | 'outOfRange')[] = ['overflow', 'divisionByZero', 'outOfRange'];
+      const reason = reasons[reader.u8()];
+      if (!reason) throw new ProtocolError('Malformed arithmetic error');
+      reader.finish(); return { kind: 'arithmeticError', reason };
     }
     throw new ProtocolError('Malformed numeric result');
   },

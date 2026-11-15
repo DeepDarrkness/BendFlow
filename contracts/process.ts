@@ -7,6 +7,7 @@ export const processCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('args') }),
   z.strictObject({ kind: z.literal('run'), program: path, arg: text(64).refine(value => !value.includes('\0')), input: text(64) }),
   z.strictObject({ kind: z.literal('random') }),
+  z.strictObject({ kind: z.literal('fixture'), behavior: z.enum(['report', 'success', 'timeout', 'overflow']), arg: text(32).refine(value => !value.includes('\0')), input: text(32) }),
 ]);
 export const processReplySchema = z.discriminatedUnion('kind', [
   failure, invalidCommand,

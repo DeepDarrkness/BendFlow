@@ -2,8 +2,13 @@ import Base
 import ./bytes.bend as Bytes
 import ./loop.bend as Loop
 
+type Resource is Type:
+  Stream{socket: Socket}
+  Datagram{socket: Socket}
+  Server{listener: Listener}
+
 type State is Type:
-  Nets{next: U32, open: Map<&1, Socket>}
+  Nets{next: U32, open: Map<&1, Resource>}
 
 type Command is Data:
   Connect{host: String, port: U32}
@@ -13,352 +18,447 @@ type Command is Data:
   Bind{host: String, port: U32}
   SendTo{id: U32, host: String, port: U32, bytes: List<&2, U32>}
   RecvFrom{id: U32, max: U32, ms: U32}
+  Listen{host: String, port: U32}
+  Accept{id: U32}
+  TryAccept{id: U32, ms: U32}
+  TryRecv{id: U32, max: U32, ms: U32}
+  TrySend{id: U32, bytes: List<&2, U32>, ms: U32}
+  TrySendTo{id: U32, host: String, port: U32, bytes: List<&2, U32>, ms: U32}
 
 def initial() -> State:
-  Nets{1, Map.new(&1, Socket)}
+  Nets{1, Map.new(&1, Resource)}
 
-def encode_fail(error: U32 & String) -> List<&2, U32>:
-  Bytes.encode_error(error)
+def restore(next: U32, open: Map<&1, Resource>, id: U32, resource: Resource, reply: List<&2, U32>) -> State & List<&2, U32>:
+  (Nets{next, Map.set(&1, Resource, open, Bytes.id_key(id), resource)}, reply)
 
-def encode_id(id: U32) -> List<&2, U32>:
-  0 <> Bytes.encode_u32(id)
+def advance(+id: U32) -> U32:
+  (id + 1 : U32)
 
-def encode_bytes(bytes: List<&2, U32>) -> List<&2, U32>:
-  1 <> Bytes.encode_len_bytes(bytes)
+def retain(+next: U32, open: Map<&1, Resource>, resource: Resource) -> State & List<&2, U32>:
+  restore(advance(next), open, next, resource, 0 <> Bytes.encode_u32(next))
 
-def missing() -> List<&2, U32>:
-  [3]
+def socket_resource(tag: U32, socket: Socket) -> Resource:
+  match tag:
+    case 0:
+      Stream{socket}
+    case other:
+      Datagram{socket}
 
-def opened_ok(+id: U32, next: U32, open: Map<&1, Socket>, sock: Socket) -> State & List<&2, U32>:
-  (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_id(id))
-
-def opened(+next: U32, open: Map<&1, Socket>, result: Result<&1, &1, U32 & String, Socket>) -> State & List<&2, U32>:
+def opened_socket(next: U32, open: Map<&1, Resource>, tag: U32, result: Result<&1, &1, U32 & String, Socket>) -> State & List<&2, U32>:
   match result:
     case Fail{error}:
-      (Nets{next, open}, encode_fail(error))
-    case Done{sock}:
-      +id = next
-      opened_ok(id, (id + 1 : U32), open, sock)
+      (Nets{next, open}, Bytes.encode_error(error))
+    case Done{socket}:
+      retain(next, open, socket_resource(tag, socket))
 
-def send_fail(+next: U32, +id: U32, open: Map<&1, Socket>, sock: Socket, error: (U32 & String) & List<&2, U32>) -> State & List<&2, U32>:
-  (pair, unsent) = error
-  (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_fail(pair))
-
-def after_send(+next: U32, +id: U32, open: Map<&1, Socket>, got: Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>) -> State & List<&2, U32>:
-  (sock, result) = got
+def opened_listener(next: U32, open: Map<&1, Resource>, result: Result<&1, &1, U32 & String, Listener>) -> State & List<&2, U32>:
   match result:
     case Fail{error}:
-      send_fail(next, id, open, sock, error)
+      (Nets{next, open}, Bytes.encode_error(error))
+    case Done{listener}:
+      retain(next, open, Server{listener})
+
+def open_resource(available: Bool, next: U32, open: Map<&1, Resource>, tag: U32, host: String, port: U32) -> IO(State & List<&2, U32>):
+  match available:
+    case False{}:
+      IO.pure(State & List<&2, U32>, (Nets{next, open}, [11]))
+    case True{}:
+      match tag:
+        case 7:
+          do IO<State & List<&2, U32>>:
+            result : Result<&1, &1, U32 & String, Listener> <- TCP.listen(host, port)
+            return opened_listener(next, open, result)
+        case other:
+          IO.pure(State & List<&2, U32>, (Nets{next, open}, [255]))
+
+def open_socket(available: Bool, next: U32, open: Map<&1, Resource>, tag: U32, host: String, port: U32) -> IO(State & List<&2, U32>):
+  match available:
+    case False{}:
+      IO.pure(State & List<&2, U32>, (Nets{next, open}, [11]))
+    case True{}:
+      match tag:
+        case 0:
+          do IO<State & List<&2, U32>>:
+            result : Result<&1, &1, U32 & String, Socket> <- TCP.connect(host, port)
+            return opened_socket(next, open, 0, result)
+        case 4:
+          do IO<State & List<&2, U32>>:
+            result : Result<&1, &1, U32 & String, Socket> <- UDP.bind(host, port)
+            return opened_socket(next, open, 4, result)
+        case other:
+          open_resource(True{}, next, open, other, host, port)
+
+def close_resource(resource: Resource) -> IO(Unit):
+  match resource:
+    case Stream{socket}:
+      Socket.close(socket)
+    case Datagram{socket}:
+      Socket.close(socket)
+    case Server{listener}:
+      Listener.close(listener)
+
+def send_reply(result: Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>) -> List<&2, U32>:
+  match result:
     case Done{u}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, Loop.ok())
+      [0]
+    case Fail{((code, message), unsent)}:
+      8 <> List.append(&2, U32, Bytes.encode_u32(code), Bytes.encode_len_bytes(unsent))
 
-def recv_data(+next: U32, +id: U32, open: Map<&1, Socket>, sock: Socket, got: Maybe<&1, List<&2, U32>>) -> State & List<&2, U32>:
-  match got:
-    case None{}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, [5])
-    case Some{bytes}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_bytes(bytes))
-
-def after_recv(+next: U32, +id: U32, open: Map<&1, Socket>, got: Socket & Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>) -> State & List<&2, U32>:
-  (sock, result) = got
-  match result:
-    case Fail{error}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_fail(error))
-    case Done{data}:
-      recv_data(next, id, open, sock, data)
-
-def with_send(+next: U32, +id: U32, bytes: List<&2, U32>, got: Map<&1, Socket> & Maybe<&1, Socket>) -> IO(State & List<&2, U32>):
-  (open, sock) = got
-  match sock:
-    case None{}:
-      IO.pure(State & List<&2, U32>, (Nets{next, open}, missing()))
-    case Some{h}:
-      do IO<State & List<&2, U32>>:
-        result : Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit> <- TCP.send_bytes(h, bytes)
-        return after_send(next, id, open, result)
-
-def with_recv(+next: U32, +id: U32, max: U32, got: Map<&1, Socket> & Maybe<&1, Socket>) -> IO(State & List<&2, U32>):
-  (open, sock) = got
-  match sock:
-    case None{}:
-      IO.pure(State & List<&2, U32>, (Nets{next, open}, missing()))
-    case Some{h}:
-      do IO<State & List<&2, U32>>:
-        result : Socket & Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>> <- TCP.recv_bytes(h, max)
-        return after_recv(next, id, open, result)
-
-def with_drop(+next: U32, got: Map<&1, Socket> & Maybe<&1, Socket>) -> IO(State & List<&2, U32>):
-  (open, sock) = got
-  match sock:
-    case None{}:
-      IO.pure(State & List<&2, U32>, (Nets{next, open}, missing()))
-    case Some{h}:
-      do IO<State & List<&2, U32>>:
-        Unit <- Socket.close(h)
-        return (Nets{next, open}, Loop.ok())
-
-def send_to_fail(+next: U32, +id: U32, open: Map<&1, Socket>, sock: Socket, error: (U32 & String) & List<&2, U32>) -> State & List<&2, U32>:
-  (pair, unsent) = error
-  (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_fail(pair))
-
-def after_send_to(+next: U32, +id: U32, open: Map<&1, Socket>, got: Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>) -> State & List<&2, U32>:
-  (sock, result) = got
-  match result:
-    case Fail{error}:
-      send_to_fail(next, id, open, sock, error)
-    case Done{u}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, Loop.ok())
-
-def dgram_reply(+next: U32, +id: U32, open: Map<&1, Socket>, sock: Socket, got: String & U32 & List<&2, U32>) -> State & List<&2, U32>:
-  (host, port, bytes) = got
-  (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, 6 <> List.append(&2, U32, Bytes.encode_text(host), List.append(&2, U32, Bytes.encode_u32(port), Bytes.encode_len_bytes(bytes))))
-
-def after_recv_from_ready(+next: U32, +id: U32, open: Map<&1, Socket>, sock: Socket, result: Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>) -> State & List<&2, U32>:
-  match result:
-    case Fail{error}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, encode_fail(error))
-    case Done{got}:
-      dgram_reply(next, id, open, sock, got)
-
-def after_recv_from(+next: U32, +id: U32, open: Map<&1, Socket>, got: Socket & Poll<&1, &1, Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>, Unit>) -> State & List<&2, U32>:
-  (sock, poll) = got
+def send_poll(poll: Poll<&1, &1, Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, List<&2, U32>>) -> List<&2, U32>:
   match poll:
-    case Ready{value}:
-      after_recv_from_ready(next, id, open, sock, value)
+    case Ready{result}:
+      send_reply(result)
+    case Wait{unsent}:
+      9 <> Bytes.encode_len_bytes(unsent)
+
+def recv_reply(result: Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>) -> List<&2, U32>:
+  match result:
+    case Fail{error}:
+      Bytes.encode_error(error)
+    case Done{None{}}:
+      [5]
+    case Done{Some{bytes}}:
+      1 <> Bytes.encode_len_bytes(bytes)
+
+def recv_poll(poll: Poll<&1, &1, Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>, Unit>) -> List<&2, U32>:
+  match poll:
+    case Ready{result}:
+      recv_reply(result)
     case Wait{u}:
-      (Nets{next, Map.set(&1, Socket, open, Bytes.id_key(id), sock)}, [7])
+      [7]
 
-def with_send_to(+next: U32, +id: U32, host: String, port: U32, bytes: List<&2, U32>, got: Map<&1, Socket> & Maybe<&1, Socket>) -> IO(State & List<&2, U32>):
-  (open, sock) = got
-  match sock:
-    case None{}:
-      IO.pure(State & List<&2, U32>, (Nets{next, open}, missing()))
-    case Some{h}:
-      do IO<State & List<&2, U32>>:
-        result : Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit> <- UDP.send_bytes_to(h, host, port, bytes)
-        return after_send_to(next, id, open, result)
+def dgram_poll(poll: Poll<&1, &1, Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>, Unit>) -> List<&2, U32>:
+  match poll:
+    case Wait{u}:
+      [7]
+    case Ready{Fail{error}}:
+      Bytes.encode_error(error)
+    case Ready{Done{(host, port, bytes)}}:
+      6 <> List.append(&2, U32, Bytes.encode_text(host), List.append(&2, U32, Bytes.encode_u32(port), Bytes.encode_len_bytes(bytes)))
 
-def with_recv_from(+next: U32, +id: U32, max: U32, ms: U32, got: Map<&1, Socket> & Maybe<&1, Socket>) -> IO(State & List<&2, U32>):
-  (open, sock) = got
-  match sock:
-    case None{}:
-      IO.pure(State & List<&2, U32>, (Nets{next, open}, missing()))
-    case Some{h}:
+def socket_reply(~A: Type, ~encode: A -> List<&2, U32>, next: U32, open: Map<&1, Resource>, id: U32, tag: U32, got: Socket & A) -> State & List<&2, U32>:
+  (socket, result) = got
+  restore(next, open, id, socket_resource(tag, socket), encode(result))
+
+def stream_op(next: U32, open: Map<&1, Resource>, id: U32, socket: Socket, tag: U32, bytes: List<&2, U32>, max: U32, ms: U32) -> IO(State & List<&2, U32>):
+  match tag:
+    case 1:
       do IO<State & List<&2, U32>>:
-        result : Socket & Poll<&1, &1, Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>, Unit> <- UDP.try_recv_bytes_from(h, max, ms)
-        return after_recv_from(next, id, open, result)
+        got : Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit> <- TCP.send_bytes(socket, bytes)
+        return socket_reply(~Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, ~send_reply, next, open, id, 0, got)
+    case 11:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Poll<&1, &1, Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, List<&2, U32>> <- TCP.try_send_bytes(socket, bytes, ms)
+        return socket_reply(~Poll<&1, &1, Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, List<&2, U32>>, ~send_poll, next, open, id, 0, got)
+    case 2:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>> <- TCP.recv_bytes(socket, max)
+        return socket_reply(~Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>, ~recv_reply, next, open, id, 0, got)
+    case 10:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Poll<&1, &1, Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>, Unit> <- TCP.try_recv_bytes(socket, max, ms)
+        return socket_reply(~Poll<&1, &1, Result<&1, &1, U32 & String, Maybe<&1, List<&2, U32>>>, Unit>, ~recv_poll, next, open, id, 0, got)
+    case other:
+      IO.pure(State & List<&2, U32>, restore(next, open, id, Stream{socket}, [10]))
+
+def datagram_op(next: U32, open: Map<&1, Resource>, id: U32, socket: Socket, tag: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, ms: U32) -> IO(State & List<&2, U32>):
+  match tag:
+    case 5:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Result<&1, &1, (U32 & String) & List<&2, U32>, Unit> <- UDP.send_bytes_to(socket, host, port, bytes)
+        return socket_reply(~Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, ~send_reply, next, open, id, 4, got)
+    case 12:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Poll<&1, &1, Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, List<&2, U32>> <- UDP.try_send_bytes_to(socket, host, port, bytes, ms)
+        return socket_reply(~Poll<&1, &1, Result<&1, &1, (U32 & String) & List<&2, U32>, Unit>, List<&2, U32>>, ~send_poll, next, open, id, 4, got)
+    case 6:
+      do IO<State & List<&2, U32>>:
+        got : Socket & Poll<&1, &1, Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>, Unit> <- UDP.try_recv_bytes_from(socket, max, ms)
+        return socket_reply(~Poll<&1, &1, Result<&1, &1, U32 & String, String & U32 & List<&2, U32>>, Unit>, ~dgram_poll, next, open, id, 4, got)
+    case other:
+      IO.pure(State & List<&2, U32>, restore(next, open, id, Datagram{socket}, [10]))
+
+def accepted(next: U32, open: Map<&1, Resource>, result: Result<&1, &1, U32 & String, Socket>) -> State & List<&2, U32>:
+  opened_socket(next, open, 0, result)
+
+def accept_poll(next: U32, open: Map<&1, Resource>, poll: Poll<&1, &1, Result<&1, &1, U32 & String, Socket>, Unit>) -> State & List<&2, U32>:
+  match poll:
+    case Ready{result}:
+      accepted(next, open, result)
+    case Wait{u}:
+      (Nets{next, open}, [7])
+
+def listener_result(next: U32, open: Map<&1, Resource>, id: U32, got: Listener & Result<&1, &1, U32 & String, Socket>) -> State & List<&2, U32>:
+  (listener, result) = got
+  accepted(next, Map.set(&1, Resource, open, Bytes.id_key(id), Server{listener}), result)
+
+def listener_poll(next: U32, open: Map<&1, Resource>, id: U32, got: Listener & Poll<&1, &1, Result<&1, &1, U32 & String, Socket>, Unit>) -> State & List<&2, U32>:
+  (listener, poll) = got
+  accept_poll(next, Map.set(&1, Resource, open, Bytes.id_key(id), Server{listener}), poll)
+
+def listener_op(available: Bool, +next: U32, open: Map<&1, Resource>, id: U32, listener: Listener, tag: U32, ms: U32) -> IO(State & List<&2, U32>):
+  match available:
+    case False{}:
+      IO.pure(State & List<&2, U32>, restore(next, open, id, Server{listener}, [11]))
+    case True{}:
+      match tag:
+        case 8:
+          do IO<State & List<&2, U32>>:
+            got : Listener & Result<&1, &1, U32 & String, Socket> <- TCP.accept(listener)
+            return listener_result(next, open, id, got)
+        case 9:
+          do IO<State & List<&2, U32>>:
+            got : Listener & Poll<&1, &1, Result<&1, &1, U32 & String, Socket>, Unit> <- TCP.try_accept(listener, ms)
+            return listener_poll(next, open, id, got)
+        case other:
+          IO.pure(State & List<&2, U32>, restore(next, open, id, Server{listener}, [10]))
+
+def resource_op(+next: U32, open: Map<&1, Resource>, id: U32, tag: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, ms: U32, resource: Resource) -> IO(State & List<&2, U32>):
+  match tag:
+    case 3:
+      do IO<State & List<&2, U32>>:
+        Unit <- close_resource(resource)
+        return (Nets{next, open}, [0])
+    case other:
+      match resource:
+        case Stream{socket}:
+          stream_op(next, open, id, socket, other, bytes, max, ms)
+        case Datagram{socket}:
+          datagram_op(next, open, id, socket, other, host, port, bytes, max, ms)
+        case Server{listener}:
+          listener_op(U32.is_ne(next, 0), next, open, id, listener, other, ms)
+
+def use_resource(next: U32, id: U32, tag: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, ms: U32, got: Map<&1, Resource> & Maybe<&1, Resource>) -> IO(State & List<&2, U32>):
+  (open, resource) = got
+  match resource:
+    case None{}:
+      IO.pure(State & List<&2, U32>, (Nets{next, open}, [3]))
+    case Some{resource}:
+      resource_op(next, open, id, tag, host, port, bytes, max, ms, resource)
 
 def step(state: State, command: Command) -> IO(State & List<&2, U32>):
   match state command:
     case Nets{+next, open} Connect{host, port}:
-      do IO<State & List<&2, U32>>:
-        result : Result<&1, &1, U32 & String, Socket> <- TCP.connect(host, port)
-        return opened(next, open, result)
-    case Nets{+next, open} Send{+id, bytes}:
-      with_send(next, id, bytes, Map.pop(&1, Socket, open, Bytes.id_key(id)))
-    case Nets{+next, open} Recv{+id, max}:
-      with_recv(next, id, max, Map.pop(&1, Socket, open, Bytes.id_key(id)))
-    case Nets{+next, open} Drop{id}:
-      with_drop(next, Map.pop(&1, Socket, open, Bytes.id_key(id)))
+      open_socket(U32.is_ne(next, 0), next, open, 0, host, port)
     case Nets{+next, open} Bind{host, port}:
-      do IO<State & List<&2, U32>>:
-        result : Result<&1, &1, U32 & String, Socket> <- UDP.bind(host, port)
-        return opened(next, open, result)
-    case Nets{+next, open} SendTo{+id, host, port, bytes}:
-      with_send_to(next, id, host, port, bytes, Map.pop(&1, Socket, open, Bytes.id_key(id)))
-    case Nets{+next, open} RecvFrom{+id, max, ms}:
-      with_recv_from(next, id, max, ms, Map.pop(&1, Socket, open, Bytes.id_key(id)))
+      open_socket(U32.is_ne(next, 0), next, open, 4, host, port)
+    case Nets{+next, open} Listen{host, port}:
+      open_socket(U32.is_ne(next, 0), next, open, 7, host, port)
+    case Nets{next, open} Send{+id, bytes}:
+      use_resource(next, id, 1, "", 0, bytes, 0, 0, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} Recv{+id, max}:
+      use_resource(next, id, 2, "", 0, [], max, 0, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} Drop{+id}:
+      use_resource(next, id, 3, "", 0, [], 0, 0, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} SendTo{+id, host, port, bytes}:
+      use_resource(next, id, 5, host, port, bytes, 0, 0, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} RecvFrom{+id, max, ms}:
+      use_resource(next, id, 6, "", 0, [], max, ms, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} Accept{+id}:
+      use_resource(next, id, 8, "", 0, [], 0, 0, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} TryAccept{+id, ms}:
+      use_resource(next, id, 9, "", 0, [], 0, ms, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} TryRecv{+id, max, ms}:
+      use_resource(next, id, 10, "", 0, [], max, ms, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} TrySend{+id, bytes, ms}:
+      use_resource(next, id, 11, "", 0, bytes, 0, ms, Map.pop(&1, Resource, open, Bytes.id_key(id)))
+    case Nets{next, open} TrySendTo{+id, host, port, bytes, ms}:
+      use_resource(next, id, 12, host, port, bytes, 0, ms, Map.pop(&1, Resource, open, Bytes.id_key(id)))
 
-def close_list(socks: List<&1, Socket>) -> IO(Unit):
-  match socks:
+def close_list(resources: List<&1, Resource>) -> IO(Unit):
+  match resources:
     case Nil{}:
       IO.pure(Unit, Unit{})
-    case h <> t:
+    case resource <> rest:
       do IO<Unit>:
-        Unit <- Socket.close(h)
-        close_list(t)
+        Unit <- close_resource(resource)
+        close_list(rest)
 
 def shutdown(state: State) -> IO(Unit):
   match state:
     case Nets{next, open}:
-      close_list(Map.values(&1, Socket, open))
+      close_list(Map.values(&1, Resource, open))
 
-def finish_connect(ok: Bool, host: String, port: U32) -> Maybe<&2, Command>:
+def valid_part(+part: String, got: Maybe<&2, U32>) -> Bool:
+  match got:
+    case None{}:
+      False{}
+    case Some{+n}:
+      Bool.and(String.eq(part, U32.show(n)), U32.is_le(n, 255))
+
+def valid_host.parts(parts: List<&2, String>) -> Bool:
+  match parts:
+    case Nil{}:
+      True{}
+    case +part <> rest:
+      Bool.and(valid_part(part, U32.read(part)), valid_host.parts(rest))
+
+def valid_host(+host: String) -> Bool:
+  +parts = String.split(host, '.')
+  Bool.and(Nat.is_eq(List.length(&2, String, parts), 4n), valid_host.parts(parts))
+
+def finish(ok: Bool, command: Maybe<&2, Command>) -> Maybe<&2, Command>:
   match ok:
     case True{}:
-      Some{Connect{host, port}}
+      command
     case False{}:
       None{}
 
-def take_connect_port(host: String, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{port, more}}:
-      finish_connect(Bytes.finished(more), host, port)
-
-def take_connect(got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitText{host, rest}}:
-      take_connect_port(host, Bytes.take_u32(rest))
-
-def finish_send(ok: Bool, id: U32, bytes: List<&2, U32>) -> Maybe<&2, Command>:
-  match ok:
-    case True{}:
+def use_command(tag: U32, id: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, ms: U32) -> Maybe<&2, Command>:
+  match tag:
+    case 1:
       Some{Send{id, bytes}}
-    case False{}:
-      None{}
-
-def take_send_bytes(id: U32, got: Maybe<&2, Bytes.SplitBytes>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitBytes{bytes, more}}:
-      finish_send(Bytes.finished(more), id, bytes)
-
-def take_send(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{id, rest}}:
-      take_send_bytes(id, Bytes.take_len_bytes(192, rest))
-
-def finish_recv(ok: Bool, id: U32, max: U32) -> Maybe<&2, Command>:
-  match ok:
-    case True{}:
+    case 2:
       Some{Recv{id, max}}
-    case False{}:
-      None{}
-
-def take_recv_max(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{+max, more}}:
-      finish_recv(Bool.and(Bytes.finished(more), Bool.and(U32.is_ge(max, 1), U32.is_le(max, 192))), id, max)
-
-def take_recv(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{id, rest}}:
-      take_recv_max(id, Bytes.take_u32(rest))
-
-def finish_drop(ok: Bool, id: U32) -> Maybe<&2, Command>:
-  match ok:
-    case True{}:
+    case 3:
       Some{Drop{id}}
-    case False{}:
-      None{}
-
-def take_drop(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{id, more}}:
-      finish_drop(Bytes.finished(more), id)
-
-def finish_bind(ok: Bool, host: String, port: U32) -> Maybe<&2, Command>:
-  match ok:
-    case True{}:
-      Some{Bind{host, port}}
-    case False{}:
-      None{}
-
-def take_bind_port(host: String, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{port, more}}:
-      finish_bind(Bytes.finished(more), host, port)
-
-def take_bind(got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitText{host, rest}}:
-      take_bind_port(host, Bytes.take_u32(rest))
-
-def finish_send_to(ok: Bool, id: U32, host: String, port: U32, bytes: List<&2, U32>) -> Maybe<&2, Command>:
-  match ok:
-    case True{}:
+    case 5:
       Some{SendTo{id, host, port, bytes}}
+    case 6:
+      Some{RecvFrom{id, max, ms}}
+    case 8:
+      Some{Accept{id}}
+    case 9:
+      Some{TryAccept{id, ms}}
+    case 10:
+      Some{TryRecv{id, max, ms}}
+    case 11:
+      Some{TrySend{id, bytes, ms}}
+    case 12:
+      Some{TrySendTo{id, host, port, bytes, ms}}
+    case other:
+      None{}
+
+def open_command(tag: U32, host: String, port: U32) -> Maybe<&2, Command>:
+  match tag:
+    case 0:
+      Some{Connect{host, port}}
+    case 4:
+      Some{Bind{host, port}}
+    case 7:
+      Some{Listen{host, port}}
+    case other:
+      None{}
+
+def decode_use(tag: U32, id: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, ms: U32, rest: List<&2, U32>) -> Maybe<&2, Command>:
+  finish(Bytes.finished(rest), use_command(tag, id, host, port, bytes, max, ms))
+
+def decode_ms(tag: U32, id: U32, host: String, port: U32, bytes: List<&2, U32>, max: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
+  match got:
+    case None{}:
+      None{}
+    case Some{Bytes.SplitU32{+ms, rest}}:
+      finish(Bool.and(U32.is_le(ms, 10000), Bytes.finished(rest)), use_command(tag, id, host, port, bytes, max, ms))
+
+def decode_bytes_rest(tag: U32, id: U32, host: String, port: U32, bytes: List<&2, U32>, rest: List<&2, U32>) -> Maybe<&2, Command>:
+  match tag:
+    case 11:
+      decode_ms(11, id, host, port, bytes, 0, Bytes.take_u32(rest))
+    case 12:
+      decode_ms(12, id, host, port, bytes, 0, Bytes.take_u32(rest))
+    case other:
+      decode_use(other, id, host, port, bytes, 0, 0, rest)
+
+def decode_bytes(tag: U32, id: U32, host: String, port: U32, got: Maybe<&2, Bytes.SplitBytes>) -> Maybe<&2, Command>:
+  match got:
+    case None{}:
+      None{}
+    case Some{Bytes.SplitBytes{bytes, rest}}:
+      decode_bytes_rest(tag, id, host, port, bytes, rest)
+
+def decode_port(ok: Bool, tag: U32, id: U32, host: String, +port: U32, rest: List<&2, U32>) -> Maybe<&2, Command>:
+  match ok:
     case False{}:
       None{}
+    case True{}:
+      match tag:
+        case 5:
+          decode_bytes(5, id, host, port, Bytes.take_len_bytes(96, rest))
+        case 12:
+          decode_bytes(12, id, host, port, Bytes.take_len_bytes(96, rest))
+        case other:
+          finish(Bytes.finished(rest), open_command(other, host, port))
 
-def take_send_to_bytes(id: U32, host: String, port: U32, got: Maybe<&2, Bytes.SplitBytes>) -> Maybe<&2, Command>:
+def decode_host_port(+tag: U32, id: U32, +host: String, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitBytes{bytes, more}}:
-      finish_send_to(Bytes.finished(more), id, host, port, bytes)
+    case Some{Bytes.SplitU32{+port, rest}}:
+      decode_port(Bool.and(valid_host(host), Bool.and(U32.is_le(port, 65535), Bool.or(Bool.or(U32.is_eq(tag, 4), U32.is_eq(tag, 7)), U32.is_ge(port, 1)))), tag, id, host, port, rest)
 
-def take_send_to_port(id: U32, host: String, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{port, rest}}:
-      take_send_to_bytes(id, host, port, Bytes.take_len_bytes(96, rest))
-
-def take_send_to_host(id: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
+def decode_host(tag: U32, id: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
     case Some{Bytes.SplitText{host, rest}}:
-      take_send_to_port(id, host, Bytes.take_u32(rest))
+      decode_host_port(tag, id, host, Bytes.take_u32(rest))
 
-def take_send_to(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
-      None{}
-    case Some{Bytes.SplitU32{id, rest}}:
-      take_send_to_host(id, Bytes.take_text(64, rest))
-
-def finish_recv_from(ok: Bool, id: U32, max: U32, ms: U32) -> Maybe<&2, Command>:
+def decode_max_ok(ok: Bool, tag: U32, id: U32, max: U32, rest: List<&2, U32>) -> Maybe<&2, Command>:
   match ok:
-    case True{}:
-      Some{RecvFrom{id, max, ms}}
     case False{}:
       None{}
+    case True{}:
+      match tag:
+        case 2:
+          decode_use(2, id, "", 0, [], max, 0, rest)
+        case other:
+          decode_ms(other, id, "", 0, [], max, Bytes.take_u32(rest))
 
-def take_recv_from_ms(id: U32, +max: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
+def decode_max(tag: U32, id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{+ms, more}}:
-      finish_recv_from(Bool.and(Bytes.finished(more), Bool.and(U32.is_le(ms, 10000), Bool.and(U32.is_ge(max, 1), U32.is_le(max, 192)))), id, max, ms)
+    case Some{Bytes.SplitU32{+max, rest}}:
+      decode_max_ok(Bool.and(U32.is_ge(max, 1), U32.is_le(max, 192)), tag, id, max, rest)
 
-def take_recv_from_max(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
+def decode_id_ok(ok: Bool, tag: U32, id: U32, rest: List<&2, U32>) -> Maybe<&2, Command>:
+  match ok:
+    case False{}:
+      None{}
+    case True{}:
+      match tag:
+        case 1:
+          decode_bytes(1, id, "", 0, Bytes.take_len_bytes(192, rest))
+        case 11:
+          decode_bytes(11, id, "", 0, Bytes.take_len_bytes(192, rest))
+        case 2:
+          decode_max(2, id, Bytes.take_u32(rest))
+        case 6:
+          decode_max(6, id, Bytes.take_u32(rest))
+        case 10:
+          decode_max(10, id, Bytes.take_u32(rest))
+        case 5:
+          decode_host(5, id, Bytes.take_text(64, rest))
+        case 12:
+          decode_host(12, id, Bytes.take_text(64, rest))
+        case 9:
+          decode_ms(9, id, "", 0, [], 0, Bytes.take_u32(rest))
+        case other:
+          decode_use(other, id, "", 0, [], 0, 0, rest)
+
+def decode_id(tag: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{max, rest}}:
-      take_recv_from_ms(id, max, Bytes.take_u32(rest))
+    case Some{Bytes.SplitU32{+id, rest}}:
+      decode_id_ok(U32.is_ge(id, 1), tag, id, rest)
 
-def take_recv_from(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
-  match got:
-    case None{}:
+def finish_tag(ok: Bool, tag: U32, rest: List<&2, U32>) -> Maybe<&2, Command>:
+  match ok:
+    case False{}:
       None{}
-    case Some{Bytes.SplitU32{id, rest}}:
-      take_recv_from_max(id, Bytes.take_u32(rest))
+    case True{}:
+      decode_id(tag, Bytes.take_u32(rest))
 
 def take_command(payload: List<&2, U32>) -> Maybe<&2, Command>:
   match payload:
     case 0 <> rest:
-      take_connect(Bytes.take_text(64, rest))
-    case 1 <> rest:
-      take_send(Bytes.take_u32(rest))
-    case 2 <> rest:
-      take_recv(Bytes.take_u32(rest))
-    case 3 <> rest:
-      take_drop(Bytes.take_u32(rest))
+      decode_host(0, 0, Bytes.take_text(64, rest))
     case 4 <> rest:
-      take_bind(Bytes.take_text(64, rest))
-    case 5 <> rest:
-      take_send_to(Bytes.take_u32(rest))
-    case 6 <> rest:
-      take_recv_from(Bytes.take_u32(rest))
-    case other:
+      decode_host(4, 0, Bytes.take_text(64, rest))
+    case 7 <> rest:
+      decode_host(7, 0, Bytes.take_text(64, rest))
+    case +tag <> rest:
+      finish_tag(U32.is_le(tag, 12), tag, rest)
+    case Nil{}:
       None{}

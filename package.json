@@ -17,6 +17,9 @@
     "test:compiler": "node scripts/test/run.ts compiler",
     "test:types": "node scripts/test/run.ts types",
     "test": "node scripts/test/run.ts full",
+    "conformance:complete": "node scripts/conformance/completion.ts",
+    "conformance:portable": "node scripts/conformance/completion.ts --mode portable",
+    "conformance:full": "node scripts/conformance/completion.ts --mode full",
     "example": "node examples/echo.ts",
     "example:session": "node examples/session.ts"
   },

@@ -19,6 +19,9 @@ export const fileCodec = validatedCodec<FileCommand, FileReply>({
       case 'readAt': return out.u8(4).u32(command.id).u32(command.offset).u32(command.max).toBuffer();
       case 'writeAt': return out.u8(5).u32(command.id).u32(command.offset).bytes(command.bytes).toBuffer();
       case 'close': return out.u8(6).u32(command.id).toBuffer();
+      case 'capture': return out.u8(7).u32(command.id).toBuffer();
+      case 'page': return out.u8(8).u32(command.snapshot).u32(command.offset).u32(command.max).toBuffer();
+      case 'release': return out.u8(9).u32(command.snapshot).toBuffer();
     }
   },
   decode(payload) {
@@ -31,6 +34,13 @@ export const fileCodec = validatedCodec<FileCommand, FileReply>({
     if (tag === 2) return fail(reader);
     if (tag === 3) { reader.finish(); return { kind: 'missing' }; }
     if (tag === 4) { const value = reader.u32(); reader.finish(); return { kind: 'size', value }; }
+    if (tag === 6) { const snapshot = reader.u32(); const total = reader.u32(); reader.finish(); return { kind: 'snapshot', snapshot, total }; }
+    if (tag === 7) {
+      const snapshot = reader.u32(), offset = reader.u32(), total = reader.u32(), count = reader.u32(), flag = reader.u8();
+      if (flag > 1) throw new ProtocolError('Invalid completion flag');
+      const data = reader.bytes(); reader.finish(); return { kind: 'page', snapshot, offset, total, count, done: flag === 1, data };
+    }
+    if (tag >= 8 && tag <= 11) { reader.finish(); return { kind: tag === 8 ? 'stale' : tag === 9 ? 'invalidOffset' : tag === 10 ? 'limit' : 'exhausted' }; }
     throw new ProtocolError('Malformed file result');
   },
 }, fileReplySchema);
