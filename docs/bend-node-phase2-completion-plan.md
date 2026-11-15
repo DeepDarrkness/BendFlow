@@ -2,6 +2,8 @@
 
 Use this plan to finish the feature-conformance suite described in [the Phase 2 specification](bend-node-phase2.md). Complete each milestone's acceptance checks before treating that milestone as finished.
 
+The current agreed scope excludes native window and audio effects. Portable rendering, event-state computation, sample synthesis, and CUDA GPU execution remain required. Record the exclusions in the inventory and completion policy rather than treating the excluded features as passed.
+
 ## Implementation progress
 
 Phase 2 is at the feature-conformance expansion stage. The gateway and validation foundation is implemented. See [the recorded status](bend-node-phase2.md) and `build/phase2-results.json` for the last executed evidence.
@@ -11,6 +13,7 @@ Phase 2 is at the feature-conformance expansion stage. The gateway and validatio
 - Milestone 3 has typed all-kind HTTP lifecycle routes and separate-client-process tests. The file path proves shared handles, failure recovery, independent filesystem observation, and close behavior.
 - The resource-cleanup portion of milestone 5 has native shutdown acknowledgement and bounded forced fallback. The wider resource and networking conformance work remains pending.
 - Milestones 4 through 9 retain their outstanding feature rows in the inventory. Hardware profiles include explicit prerequisites.
+- CUDA 13.1 build components and Clang 19 are available locally. A GPU-marked fixture produces a CUDA-linked executable and passes CPU fallback. WSL2 rejects actual GPU execution and does not generate a `.gpu` artifact. See the specification's CUDA build verification for measured results.
 
 ## Reconcile the recorded baseline with the working tree
 
@@ -48,6 +51,7 @@ The current architecture supports the remaining work:
 3. Run the targeted inventory check above, `npm run test:unit`, `npx tsc --noEmit`, and `npm test`.
 4. Confirm that the regenerated report verifies its referenced tests and remains `in-progress` because required features are pending.
 5. Record the new test totals and toolchain. Preserve existing feature IDs and their declared scope.
+6. Record the user's native window and audio exclusions explicitly. Keep CUDA execution as an outstanding requirement for full completion of the agreed scope.
 
 Acceptance requires a fresh full-suite pass, valid evidence references, and a regenerated `build/phase2-results.json`. This milestone repairs evidence plumbing before new feature work.
 
@@ -183,23 +187,22 @@ Acceptance requires equivalent algorithm results across CPU configurations and o
 
 Acceptance requires positive fixtures to pass and their invalid counterparts to fail for the intended reason. Pure laws must pass the configured proof gate. Report foreign-effect workers separately because proofs do not establish C-effect or wire correctness.
 
-## 9. Implement and verify hardware profiles
+## 9. Complete CUDA artifacts and runner verification
 
 Start arranging suitable machines and fixtures after milestone 0, while portable features are implemented. Hardware availability can otherwise delay the final phase.
 
 1. Add actual GPU-marked computations and the build support for their native GPU artifacts. Retain the artifacts beside the executable as required by Bend.
-2. Select runtime arguments using the pinned compiler's documented options and help output. Verify the existing GPU argument policy rather than assuming `--gpu on` is supported.
-3. Run deterministic sum, simulation, or rendering cases on a configured Metal or CUDA host. Record device and runtime instrumentation that establishes actual GPU execution.
+2. Retain separate CPU-only and CUDA-enabled executable variants for Node-package deployment. CUDA-enabled binaries require `libcuda` and `libnvrtc` even with `--gpu off`.
+3. Generate the `.gpu` artifact and run deterministic sum, simulation, or rendering cases on a native Linux CUDA runner with concurrent managed access. Record device instrumentation that establishes actual GPU execution.
 4. Test CPU fallback separately. Correct output from a fallback run must not verify the GPU profile.
-5. Add native `Window` lifecycle and event tests against a configured display fixture. Observe a presented frame, event delivery, and close behavior externally.
-6. Add native `Audio` lifecycle and sample-output tests against an audio capture fixture. Verify captured samples and resource cleanup.
-7. Store profile results with the host, toolchain, commands, instrumentation, and fixture configuration. Feed these results into the completion report and capabilities configuration.
+5. Store profile results with the host, toolchain, commands, instrumentation, and fixture configuration. Feed these results into the completion report and capabilities configuration.
+6. Check that the packaged CUDA executable has its matching `.gpu` artifact and documented runtime-library requirements. A successful WSL2 `--gpu-build` exit code does not establish artifact generation.
 
-Acceptance requires observed GPU execution, observed window effects, and observed audio effects on their configured hosts. On a host without these prerequisites, return `unavailable` with a reason and setup instructions. Never report an unavailable run as passed or silently skip a requested available profile.
+Acceptance requires observed CUDA GPU execution on the configured runner. On a host without these prerequisites, return `unavailable` with a reason and setup instructions. Never report an unavailable run as passed or silently skip a requested available profile. Native window and audio tests are excluded from this milestone.
 
-The specification permits unavailable profiles in a portable completion report. Mark full all-profile verification only after the hardware checks pass on suitable hosts.
+The specification permits unavailable profiles in a portable completion report. Mark full completion of the agreed scope only after the CUDA checks pass on a suitable host.
 
-Track missing hardware implementation separately from missing hardware access. The current unavailable rows also name missing kernels and native Window and Audio commands. Add those commands and build targets before claiming that only host verification remains.
+Track missing GPU application implementation separately from missing runner access. The current probe verifies tooling, but production compute commands still need GPU-marked workloads and device evidence.
 
 ## 10. Run the final conformance check and update the status
 
@@ -211,7 +214,7 @@ Track missing hardware implementation separately from missing hardware access. T
 6. Update `README.md` with all-session gateway usage and links to the protocol, profile setup, and conformance report.
 7. Publish one completion artifact with feature results, toolchain revision, profile results, and external fixture evidence.
 
-Add a full all-profile completion outcome only when GPU, window, and audio feature evidence has passed. The current reporter emits `portable-complete`; extend the report deliberately rather than treating that value as all-profile completion.
+Add a scoped completion outcome only when all portable requirements and CUDA GPU evidence have passed, with native window and audio exclusions recorded. The current reporter emits `portable-complete`; that value alone does not establish CUDA verification.
 
 Keep hardware setup commands and hardware verification commands separate from the required portable test command. A host with configured hardware must fail a requested profile run when that profile is broken.
 
@@ -231,7 +234,7 @@ Execute in this order:
 8. Finish hardware implementation and observed verification in milestone 9 on configured hosts.
 9. Run milestone 10 and publish the completion outcome.
 
-Prepare hardware hosts during steps 2 through 7. Hardware tests depend on the compute commands, resource lifecycle, and build support. Full all-profile completion depends on those tests passing.
+Prepare the CUDA runner during steps 2 through 7. GPU tests depend on the compute commands, resource lifecycle, and build support. Full completion of the agreed scope depends on those tests passing.
 
 The immediate implementation slice is milestone 0, followed by bounded collection and file paging. Prove exact page reassembly, empty and final pages, invalid offsets, maximum totals, and mutation between page requests.
 
@@ -252,7 +255,9 @@ Use these groups to select work after the baseline is restored. Revalidate the i
 | Compute, milestone 7 | `compute.balanced-sum-sort`, `compute.simulation-events-rendering`, `compute.samples` | Independent references across one, two, and four threads, state transitions, deterministic pixels and samples, and paged reassembly. |
 | HTTP effects, milestones 3, 5, and 6 | `gateway.effectful-no-replay`, `gateway.effect-families` | A fixture observes an effect whose reply is lost. The effect count stays one. Each effect family has an HTTP success and applicable failure sequence. |
 | Compiler, milestone 8 | `compiler.affine-resources`, `compiler.templates-dependent-inputs`, `compiler.laws-verdict` | Positive fixtures pass, negative fixtures fail for the intended diagnostic, and pure-core laws pass `--verdict`. |
-| Hardware, milestone 9 | `hardware.gpu`, `hardware.window`, `hardware.audio`, currently unavailable | Device execution instrumentation, captured window presentation and events, captured audio, and explicit cleanup evidence. |
+| CUDA, milestone 9 | `hardware.gpu`, currently unavailable | GPU-marked application workloads, matching device artifacts, CPU fallback, and actual device execution instrumentation. |
+
+`hardware.window` and `hardware.audio` remain in the retained inventory as unavailable rows. They are excluded by the user's decision and are not remaining implementation requirements for the agreed scope.
 
 For each unit, update the contract, codec, native handler, relevant tests, and feature evidence together. Preserve existing Phase 1 and Phase 2 regression coverage. A feature becomes verified only after its referenced test actually passes.
 
@@ -266,9 +271,9 @@ For each unit, update the contract, codec, native handler, relevant tests, and f
 - Larger supported results survive complete chunk or page reassembly.
 - Uncertain effects are never automatically replayed.
 - Parallel algorithms return correct results across the supported CPU thread configurations.
-- GPU, window, and audio claims have execution evidence, or appear explicitly as unavailable in the portable report.
+- CUDA GPU claims have execution evidence, or appear explicitly as unavailable in the portable report. Native window and audio exclusions are explicit.
 - The coverage inventory, capability endpoint, documentation, and executed result report agree.
 
-Portable completion requires every required native-CPU, multithreaded-CPU, and compiler feature to be verified. Hardware rows may remain unavailable with concrete reasons in that report. Completing the entire all-profile Phase 2 additionally requires verified GPU, window, and audio evidence.
+Portable completion requires every required native-CPU, multithreaded-CPU, and compiler feature to be verified. CUDA may remain unavailable with a concrete reason in that report. Full completion of the agreed Phase 2 scope additionally requires verified CUDA GPU evidence, with native window and audio exclusions recorded.
 
 The recorded 124-test pass establishes the previous foundation. Completion depends on expanded feature evidence and a fresh passing report, not a target test count.

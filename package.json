@@ -9,6 +9,7 @@
   "scripts": {
     "setup:bend": "node scripts/setup/bend.ts",
     "setup:clang": "node scripts/setup/clang.ts",
+    "setup:cuda": "node scripts/setup/cuda.ts",
     "build:native": "node scripts/build/native.ts",
     "typecheck": "tsc --noEmit",
     "test:unit": "node scripts/test/run.ts unit",

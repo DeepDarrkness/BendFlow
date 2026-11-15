@@ -2,7 +2,11 @@
 
 ## Phase 2 status
 
-Phase 2 has completed its gateway and validation foundation. All eight session kinds have typed HTTP create, command, and close routes. Native CPU tests pass, and the compute baseline is verified with four CPU threads. The broader conformance work remains in progress. The `gpu` and `graphics-audio` profiles report `unavailable` with reasons.
+Phase 2 has completed its gateway and validation foundation. All eight session kinds have typed HTTP create, command, and close routes. The recorded native CPU baseline passes, including compute on four CPU threads. The broader conformance work remains in progress. Local CUDA-enabled executable compilation is now verified, but actual GPU execution remains unavailable on this WSL2 host.
+
+The agreed completion scope includes portable CPU and compiler conformance plus CUDA GPU coverage on a compatible native Linux runner. Native window and audio effects are excluded by the user's decision. Pure image rendering, event-state computation, and sample synthesis remain in scope. The inventory still lists `hardware.window` and `hardware.audio` as unavailable; synchronize their reasons and the completion policy with this scope when restoring the inventory.
+
+The retained inventory has 40 rows marked verified, 34 pending portable feature rows, and 3 unavailable hardware rows. CUDA compilation checks do not promote `hardware.gpu` to verified. Two of the hardware rows are now excluded from the agreed scope.
 
 The [completion plan](bend-node-phase2-completion-plan.md) orders the remaining work. The feature inventory records pending nested encodings, paging, language features, effect failure sequences, balanced parallel algorithms, and pure-core proofs. Passing the current suite does not establish completion of those requirements.
 
@@ -40,16 +44,35 @@ Independent fixtures observe the effects:
 
 `f32Add` bitcasts `U32` payloads to `F32`, so NaN follows native bits rather than JSON numbers. The Bend checker rejects duplicated affine numeric state, a match on a computed value, a non-decreasing recursive call, and a live use of an erased binder.
 
-The recorded baseline has a successful `npx tsc --noEmit` and an `npm test` run with 124 passed, 0 failed, and 0 skipped. That run passed both Phase 1 and Phase 2 tests and wrote the conformance report. Its verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending. The reorganized working tree needs a fresh verification run after the inventory paths are repaired.
+The recorded baseline has a successful `npx tsc --noEmit` and an `npm test` run with 124 passed, 0 failed, and 0 skipped. That run passed both Phase 1 and Phase 2 tests and wrote the conformance report. Its verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending. The CUDA setup changes also passed `npx tsc --noEmit`. A full native rebuild was interrupted; the compute worker and CUDA probe were subsequently built and checked separately. The reorganized working tree needs a fresh full verification run after the inventory paths are repaired.
 
-To reproduce the checks, run:
+### CUDA build verification
+
+CUDA 13.1 build components are installed locally under `.toolchain/cuda`, with Clang 19.1.1 available for GPU-marked builds. `scripts/setup/cuda.ts`, `scripts/setup/clang.ts`, and `scripts/lib/toolchain.ts` support the local setup. `scripts/build/native.ts` records the deployment constraints.
+
+The fixture `tests/fixtures/phase2/gpu-check.bend` uses balanced parallel recursion and `pow2!(10n)`. It was compiled with the same Clang 19 compiler both without and with CUDA support:
+
+| Check | Observed result |
+| --- | --- |
+| CPU-only executable | 45,784 bytes; prints `1024` |
+| CUDA-enabled executable | 137,920 bytes; additionally links `libcuda.so.1` and `libnvrtc.so.13` |
+| CUDA-enabled executable with `--gpu off` | Prints `1024`; CUDA shared libraries are still required |
+| CUDA-enabled executable with `--gpu on` in WSL2 | Exits with code 1 and `CUDA device lacks concurrent managed access (WSL2 lacks it)` |
+| `--gpu-build` in WSL2 | Returns success without creating the `.gpu` artifact |
+| Existing compute worker rebuilt with Clang 18 | Byte-for-byte identical to the previous executable; it has no `!` calls |
+
+The host exposes an NVIDIA GeForce RTX 4060 Laptop GPU through Windows driver `591.59`. CUDA driver initialization succeeds, but the device reports `concurrent_managed_access = 0`. The pinned Bend runtime requires that capability. These checks verify compilation and CPU fallback, not successful GPU execution.
+
+For Node-package deployment, retain separate CPU-only and CUDA-enabled executable variants. A CUDA-enabled executable needs its CUDA libraries even when GPU execution is disabled. Generate the matching `.gpu` artifact and run CUDA-specific tests on a native Linux runner with a supported NVIDIA GPU, CUDA libraries, and concurrent managed access. Record actual device execution evidence before verifying the GPU profile.
+
+After repairing the inventory paths, rerun the portable checks:
 
 ```sh
 npx tsc --noEmit
 npm test
 ```
 
-Correct pixels alone are not GPU evidence. Bend runs `!` calls on the CPU when GPU execution is unavailable. This machine has no GPU-execution instrumentation, so the `gpu` profile is `unavailable`. It also has no window or audio fixture, so `graphics-audio` is `unavailable`.
+Correct pixels alone are not GPU evidence. Bend can run `!` calls on the CPU when GPU execution is unavailable. Explicit `--gpu on` rejects this WSL2 host because it lacks concurrent managed access. The `gpu` profile remains unavailable here until execution is tested on a compatible native Linux runner. The `graphics-audio` profile remains unavailable and its native window and audio effects are excluded from the agreed completion scope.
 
 ## Recommended strategy
 
@@ -226,9 +249,9 @@ Divide execution into:
 1. A required native CPU profile covering all portable computation, files, networking, processes, concurrency and custom C effects.
 2. A multithreaded CPU profile running the same parallel algorithms with different thread configurations.
 3. A GPU profile exercising actual Metal or CUDA execution on suitable machines.
-4. A graphics and audio profile exercising native window and audio effects on configured display and audio fixtures.
+4. A graphics and audio profile reserved for future native window and audio coverage. Those effects are excluded from the agreed Phase 2 completion scope.
 
-Pure rendering and sample generation can be tested without devices. Actual `Window` and `Audio` effects require a separate configured environment.
+Pure rendering and sample generation remain required and can be tested without devices. Actual `Window` and `Audio` effects would require separate configured environments if their scope is restored.
 
 Bend can run `!` calls on the CPU when GPU execution is unavailable. Correct output alone is therefore insufficient evidence that a GPU test ran on a GPU. That profile needs execution evidence from runtime or device instrumentation.
 
@@ -245,7 +268,7 @@ Implement in this order:
 
 Maintain a machine-readable coverage inventory mapping each intended feature or API to its command, tests, execution profile, and evidence. Compiler-only features get compiler tests. Report unavailable profiles explicitly.
 
-Phase 2 is complete when every declared supported feature has evidence, and every effect family has a real externally observed test.
+Phase 2 is complete for the agreed scope when every supported portable feature and CUDA GPU feature has evidence, and every in-scope effect family has a real externally observed test. Native window and audio effects are excluded, not passed. Portable completion can be reported separately while CUDA runner verification remains outstanding.
 
 The next slice is restoring the conformance evidence paths, then bounded paging and complete codec vectors, followed by the missing numeric and collection features. The gateway and persistent-file HTTP path are implemented. Use the [completion plan](bend-node-phase2-completion-plan.md) and the feature inventory to select the next unverified requirement.
 

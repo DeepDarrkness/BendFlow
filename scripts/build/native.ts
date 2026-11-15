@@ -18,6 +18,11 @@ const versions = {
   runtimeArgs: CPU_ARGS,
 };
 mkdirSync(projectPath('build'), { recursive: true });
+// CUDA-enabled builds with ! calls link libcuda.so.1 and libnvrtc.so.13 (CUDA 13),
+// even with --gpu off. Package a separate CPU-only executable for hosts without CUDA.
+// CUDA-specific testing and .gpu finalization require a native Linux runner with
+// CUDA support and concurrent managed access. WSL2 lacks that capability, and
+// --gpu-build can return success there without creating the .gpu artifact.
 for (const { input, output, checkOnly } of nativeTargets) {
   if (checkOnly) {
     process.stdout.write(run(bun, [resolve(source, 'bend2/main.ts'), input, '--check-only']) + '\n');
