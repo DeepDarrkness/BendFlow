@@ -1,9 +1,9 @@
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
 
-const u32 = z.number().int().min(0).max(0xffffffff);
-const text = z.string().max(96);
-const items = z.array(u32).max(32);
+import { u32, text as boundedText, items } from './values.ts';
+
+const text = boundedText();
 
 export const collectionCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('put'), key: text, value: text }),
@@ -19,9 +19,9 @@ export const collectionCommandSchema = z.discriminatedUnion('kind', [
 
 export const collectionReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ok') }),
-  z.strictObject({ kind: z.literal('text'), text: z.string() }),
+  z.strictObject({ kind: z.literal('text'), text }),
   z.strictObject({ kind: z.literal('missing') }),
-  z.strictObject({ kind: z.literal('deleted'), text: z.string() }),
+  z.strictObject({ kind: z.literal('deleted'), text }),
   z.strictObject({ kind: z.literal('cell'), value: u32 }),
   z.strictObject({ kind: z.literal('items'), items }),
   z.strictObject({ kind: z.literal('invalidCommand') }),

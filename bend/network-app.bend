@@ -18,8 +18,7 @@ def initial() -> State:
   Nets{1, Map.new(&1, Socket)}
 
 def encode_fail(error: U32 & String) -> List<&2, U32>:
-  (code, message) = error
-  2 <> List.append(&2, U32, Bytes.encode_u32(code), Bytes.encode_text(message))
+  Bytes.encode_error(error)
 
 def encode_id(id: U32) -> List<&2, U32>:
   0 <> Bytes.encode_u32(id)
@@ -237,8 +236,8 @@ def take_recv_max(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{max, more}}:
-      finish_recv(Bytes.finished(more), id, max)
+    case Some{Bytes.SplitU32{+max, more}}:
+      finish_recv(Bool.and(Bytes.finished(more), Bool.and(U32.is_ge(max, 1), U32.is_le(max, 192))), id, max)
 
 def take_recv(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
@@ -324,12 +323,12 @@ def finish_recv_from(ok: Bool, id: U32, max: U32, ms: U32) -> Maybe<&2, Command>
     case False{}:
       None{}
 
-def take_recv_from_ms(id: U32, max: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
+def take_recv_from_ms(id: U32, +max: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{ms, more}}:
-      finish_recv_from(Bytes.finished(more), id, max, ms)
+    case Some{Bytes.SplitU32{+ms, more}}:
+      finish_recv_from(Bool.and(Bytes.finished(more), Bool.and(U32.is_le(ms, 10000), Bool.and(U32.is_ge(max, 1), U32.is_le(max, 192)))), id, max, ms)
 
 def take_recv_from_max(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:

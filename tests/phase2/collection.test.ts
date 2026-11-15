@@ -39,3 +39,20 @@ test('independent collection workers do not share maps', async t => {
   await first.command({ kind: 'put', key: 'k', value: 'v' });
   assert.deepEqual(await second.command({ kind: 'get', key: 'k' }), { kind: 'missing' });
 });
+
+test('native collection decoder rejects overlong, surrogate, and out-of-range UTF-8 without mutation', async t => {
+  const session = await app(t);
+  await session.command({ kind: 'put', key: 'k', value: 'kept' });
+  for (const bytes of [
+    [0xe0, 0x81, 0x81], [0xed, 0xa0, 0x80], [0xf0, 0x80, 0x81, 0x81], [0xf4, 0x90, 0x80, 0x80],
+    [0xc0, 0x81], [0xe1, 0x80], [0x80],
+  ]) {
+    const payload = Buffer.from([0, 1, 107, bytes.length, ...bytes]);
+    assert.deepEqual(collectionCodec.decode(await session.raw(payload)), { kind: 'invalidCommand' });
+    assert.deepEqual(await session.command({ kind: 'get', key: 'k' }), { kind: 'text', text: 'kept' });
+  }
+  for (const text of ['\u07ff', '\u0800', '\ud7ff', '\ue000', '\uffff', '\u{10000}', '\u{10ffff}', '\ufeff']) {
+    await session.command({ kind: 'put', key: 'k', value: text });
+    assert.deepEqual(await session.command({ kind: 'get', key: 'k' }), { kind: 'text', text });
+  }
+});

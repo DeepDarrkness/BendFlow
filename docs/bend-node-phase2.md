@@ -2,16 +2,30 @@
 
 ## Phase 2 status
 
-Phase 2 has compiled workers and tests for the required `native-cpu` profile. The `multithreaded-cpu` profile is verified with four threads. Eight session kinds run through the Node gateway. The `gpu` and `graphics-audio` profiles report `unavailable`.
+Phase 2 has completed its gateway and validation foundation. All eight session kinds have typed HTTP create, command, and close routes. Native CPU tests pass, and the compute baseline is verified with four CPU threads. The broader conformance work remains in progress. The `gpu` and `graphics-audio` profiles report `unavailable` with reasons.
+
+The [completion plan](bend-node-phase2-completion-plan.md) orders the remaining work. The feature inventory records pending nested encodings, paging, language features, effect failure sequences, balanced parallel algorithms, and pure-core proofs. Passing the current suite does not establish completion of those requirements.
 
 The implementation includes:
 
 - One native executable per session kind, one process per session, and native `initialize`, `command`, and `shutdown` operations.
 - A shared worker loop in `bend/loop.bend` and a shared codec in `bend/bytes.bend`.
-- Typed Node codecs in `src/protocol/apps.ts` and `NativeApp` in `src/app.ts`.
-- Gateway capabilities that list session kinds and execution profiles.
+- Strict command and reply schemas for every kind under `contracts/`, validated codecs in `src/protocol/apps.ts`, and `NativeApp` in `src/app.ts`.
+- A session-owning HTTP gateway in `src/gateway.ts` and `src/apps.ts`, and a reply-validating client in `src/client.ts`.
+- Gateway capabilities that list supported session kinds and distinguish available profiles from verified test results.
 - Tests under `tests/phase2/`.
-- The coverage inventory in `tests/phase2/coverage.json`.
+- A feature-level coverage inventory in `tests/phase2/coverage.json`, with required feature IDs in `scripts/phase2-requirements.ts`.
+- An executed-test report in `build/phase2-results.json`. Verified rows require an actual passing test with the referenced file and name.
+
+The foundation also includes:
+
+- Separate-process HTTP lifecycle tests for all eight kinds.
+- Two independent file client processes sharing a retained affine handle, recovery after a failed read, and an independent filesystem observation.
+- A bounded JSON byte serializer shared by the gateway and client.
+- Strict UTF-8 validation in Node and native Bend, including raw-input rejection without state mutation.
+- Native read-size bounds and bounded oversized-output errors.
+- An idle native shutdown acknowledgement after resource cleanup, with forced termination for stalled workers.
+- Cleanup-failure propagation when gateway shutdown overlaps session startup.
 
 Independent fixtures observe the effects:
 
@@ -24,7 +38,7 @@ Independent fixtures observe the effects:
 
 `f32Add` bitcasts `U32` payloads to `F32`, so NaN follows native bits rather than JSON numbers. The Bend checker rejects duplicated affine numeric state, a match on a computed value, a non-decreasing recursive call, and a live use of an erased binder.
 
-`npx tsc --noEmit` succeeds. `npm test` reports 98 passed, 0 failed, and 0 skipped. Phase 1 session tests still pass. The verified toolchain was Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`.
+`npx tsc --noEmit` succeeds. `npm test` reports 124 passed, 0 failed, and 0 skipped, and writes the conformance report. Both Phase 1 and Phase 2 tests pass. The verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending.
 
 To reproduce the checks, run:
 
@@ -231,7 +245,7 @@ Maintain a machine-readable coverage inventory mapping each intended feature or 
 
 Phase 2 is complete when every declared supported feature has evidence, and every effect family has a real externally observed test.
 
-The recommended next slice is the collection workspace plus persistent file handles. Together they substantially extend the numeric experiment and test the ownership model that later effectful applications depend on.
+The next slice is bounded paging and complete codec vectors, followed by the missing numeric and collection features. The gateway and persistent-file HTTP path are now implemented. Use the [completion plan](bend-node-phase2-completion-plan.md) and the feature inventory to select the next unverified requirement.
 
 ## Sources
 

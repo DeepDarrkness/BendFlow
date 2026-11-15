@@ -19,17 +19,25 @@ def responded(~S: Type, s: Socket, +id: U32, +op: U32, result: S & List<&2, U32>
   (state, payload) = result
   Transport.send(s, Transport.Frame{4, id, op, payload}, s2 => next(s2, state))
 
-def execute(~S: Type, ~handle: S -> U32 -> List<&2, U32> -> IO(S & List<&2, U32>), s: Socket, state: S, +id: U32, +op: U32, payload: List<&2, U32>, next: Socket -> S -> IO(Unit)) -> IO(Unit):
-  do IO<Unit>:
-    result : S & List<&2, U32> <- handle(state, op, payload)
-    responded(~S, s, id, op, result, next)
+def execute(~S: Type, ~handle: S -> U32 -> List<&2, U32> -> IO(S & List<&2, U32>), ~shutdown: S -> IO(Unit), s: Socket, state: S, +id: U32, +op: U32, payload: List<&2, U32>, next: Socket -> S -> IO(Unit)) -> IO(Unit):
+  match op payload:
+    case 3 Nil{}:
+      do IO<Unit>:
+        Unit <- shutdown(state)
+        Transport.send(s, Transport.Frame{4, id, 3, ok()}, s2 => Socket.close(s2))
+    case 3 other:
+      responded(~S, s, id, op, (state, invalid()), next)
+    case other bytes:
+      do IO<Unit>:
+        result : S & List<&2, U32> <- handle(state, op, bytes)
+        responded(~S, s, id, op, result, next)
 
 def checked(~S: Type, ~handle: S -> U32 -> List<&2, U32> -> IO(S & List<&2, U32>), ~shutdown: S -> IO(Unit), valid: Bool, s: Socket, state: S, id: U32, op: U32, payload: List<&2, U32>, next: Socket -> S -> IO(Unit)) -> IO(Unit):
   match valid:
     case False{}:
       die(~S, ~shutdown, s, state)
     case True{}:
-      execute(~S, ~handle, s, state, id, op, payload, next)
+      execute(~S, ~handle, ~shutdown, s, state, id, op, payload, next)
 
 def handshake(~S: Type, ~shutdown: S -> IO(Unit), ~contract: Unit -> List<&2, U32>, valid: Bool, s: Socket, state: S, next: Socket -> S -> IO(Unit)) -> IO(Unit):
   match valid:

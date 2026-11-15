@@ -56,6 +56,7 @@ export class BendWorker {
   #options: Required<WorkerOptions>;
   #exited = Promise.withResolvers<void>();
   #cleanup: Promise<void> | undefined;
+  #shutdown: Promise<void> | undefined;
   #abort = new AbortController();
   #diagnostics = Buffer.alloc(0);
 
@@ -210,6 +211,25 @@ export class BendWorker {
   close(): Promise<void> {
     this.#cleanup ??= this.#terminate();
     return this.#cleanup;
+  }
+
+  shutdown(): Promise<void> {
+    this.#shutdown ??= this.#gracefulShutdown();
+    return this.#shutdown;
+  }
+
+  async #gracefulShutdown(): Promise<void> {
+    if (this.#state === 'ready') {
+      const timer = setTimeout(() => { void this.close().catch(() => {}); }, this.#options.terminationGraceMs);
+      try {
+        const reply = await this.call(3, Buffer.alloc(0));
+        if (!reply.equals(Buffer.from([0]))) throw new ProtocolError('Invalid shutdown acknowledgement');
+        await this.#waitForExit(this.#options.terminationGraceMs);
+      } catch {
+        // A missing acknowledgement leaves completion uncertain; terminate without replay.
+      } finally { clearTimeout(timer); }
+    }
+    await this.close();
   }
 
   async #terminate(): Promise<void> {

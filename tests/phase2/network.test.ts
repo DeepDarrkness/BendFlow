@@ -6,6 +6,8 @@ import test, { type TestContext } from 'node:test';
 import { NativeApp } from '../../src/app.ts';
 import { networkCodec } from '../../src/protocol/apps.ts';
 import { availablePort } from '../../src/worker.ts';
+import { BendWorker } from '../../src/worker.ts';
+import { NETWORK_CONTRACT } from '../../src/protocol/apps.ts';
 import { assertGone, bounded } from '../helpers.ts';
 
 const executable = resolve('build/network-worker');
@@ -65,4 +67,21 @@ test('udp datagram payload is observed by a separate peer', async t => {
   assert.equal(reply.kind, 'dgram');
   if (reply.kind !== 'dgram') throw new Error('expected dgram');
   assert.equal(Buffer.from(reply.bytes).toString('utf8'), 'pong');
+});
+
+test('native shutdown acknowledges resource cleanup and closes a retained TCP socket', async t => {
+  const peerClosed = Promise.withResolvers<void>();
+  const server = createServer(socket => {
+    socket.on('end', () => { peerClosed.resolve(); socket.end(); });
+  });
+  await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve));
+  t.after(() => new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())));
+  const address = server.address();
+  if (!address || typeof address === 'string') throw new Error('Expected IPv4 peer');
+  const worker = await BendWorker.start({ executable, contract: NETWORK_CONTRACT });
+  t.after(async () => { await bounded(worker.close()); assertGone(worker.pid); });
+  const opened = networkCodec.decode(await worker.call(1, networkCodec.encode({ kind: 'connect', host: '127.0.0.1', port: address.port })));
+  assert.equal(opened.kind, 'opened');
+  assert.deepEqual(await worker.call(3, Buffer.alloc(0)), Buffer.from([0]));
+  await bounded(peerClosed.promise);
 });

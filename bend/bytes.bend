@@ -90,13 +90,20 @@ def take_len_bytes(max: U32, bytes: List<&2, U32>) -> Maybe<&2, SplitBytes>:
 def utf8_cont(+b: U32) -> Bool:
   Bool.and(U32.is_ge(b, 128), U32.is_le(b, 191))
 
+def scalar_char(valid: Bool, code: U32, more: List<&2, U32>) -> Maybe<&2, SplitChar>:
+  match valid:
+    case False{}:
+      None{}
+    case True{}:
+      Some{SplitChar{Chr{code}, more}}
+
 def four_byte_got(ok: Bool, +b: U32, +c: U32, +d: U32, +e: U32, more: List<&2, U32>) -> Maybe<&2, SplitChar>:
   match ok:
     case False{}:
       None{}
     case True{}:
       +code = (((((b .&. 7 : U32) << 18n : U32) .|. ((c .&. 63 : U32) << 12n : U32) : U32) .|. ((d .&. 63 : U32) << 6n : U32) : U32) .|. (e .&. 63 : U32) : U32)
-      Some{SplitChar{Chr{code}, more}}
+      scalar_char(Bool.and(U32.is_ge(code, 65536), U32.is_le(code, 1114111)), code, more)
 
 def four_byte_char(ok: Bool, b: U32, rest: List<&2, U32>) -> Maybe<&2, SplitChar>:
   match ok:
@@ -115,7 +122,7 @@ def three_byte_got(ok: Bool, +b: U32, +c: U32, +d: U32, more: List<&2, U32>) -> 
       None{}
     case True{}:
       +code = ((((b .&. 15 : U32) << 12n : U32) .|. ((c .&. 63 : U32) << 6n : U32) : U32) .|. (d .&. 63 : U32) : U32)
-      Some{SplitChar{Chr{code}, more}}
+      scalar_char(Bool.and(U32.is_ge(code, 2048), Bool.or(U32.is_lt(code, 55296), U32.is_gt(code, 57343))), code, more)
 
 def three_byte_char(ok: Bool, +b: U32, rest: List<&2, U32>) -> Maybe<&2, SplitChar>:
   match ok:
@@ -307,6 +314,29 @@ def encode_text.go(s: String, acc: List<&2, U32>) -> List<&2, U32>:
 
 def encode_text(s: String) -> List<&2, U32>:
   encode_len_bytes(encode_text.go(s, []))
+
+def encode_error_bytes(code: U32, message: List<&2, U32>, fits: Bool) -> List<&2, U32>:
+  match fits:
+    case True{}:
+      2 <> List.append(&2, U32, encode_u32(code), encode_len_bytes(message))
+    case False{}:
+      2 <> List.append(&2, U32, encode_u32(code), encode_text("native error message exceeds bound"))
+
+def encode_error(error: U32 & String) -> List<&2, U32>:
+  (code, message) = error
+  +bytes = encode_text.go(message, [])
+  encode_error_bytes(code, bytes, Nat.is_le(List.length(&2, U32, bytes), 96n))
+
+def text_reply_bytes(tag: U32, bytes: List<&2, U32>, fits: Bool) -> List<&2, U32>:
+  match fits:
+    case True{}:
+      tag <> encode_len_bytes(bytes)
+    case False{}:
+      encode_error((75, "reply exceeds text bound"))
+
+def text_reply(tag: U32, text: String) -> List<&2, U32>:
+  +bytes = encode_text.go(text, [])
+  text_reply_bytes(tag, bytes, Nat.is_le(List.length(&2, U32, bytes), 96n))
 
 def finished(bytes: List<&2, U32>) -> Bool:
   match bytes:

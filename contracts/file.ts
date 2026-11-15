@@ -1,26 +1,26 @@
 import { oc } from '@orpc/contract';
 import { z } from 'zod';
 
-const u32 = z.number().int().min(0).max(0xffffffff);
-const path = z.string().max(96);
+import { u32, resourceId, path, bytes, readSize, failure } from './values.ts';
+
 const mode = z.enum(['r', 'r+', 'w', 'a', 'x']);
-const bytes = z.custom<Uint8Array>(value => value instanceof Uint8Array && value.byteLength <= 192);
+const data = bytes();
 
 export const fileCommandSchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('open'), path, mode }),
-  z.strictObject({ kind: z.literal('write'), id: u32, bytes }),
-  z.strictObject({ kind: z.literal('read'), id: u32, max: u32 }),
-  z.strictObject({ kind: z.literal('size'), id: u32 }),
-  z.strictObject({ kind: z.literal('readAt'), id: u32, offset: u32, max: u32 }),
-  z.strictObject({ kind: z.literal('writeAt'), id: u32, offset: u32, bytes }),
-  z.strictObject({ kind: z.literal('close'), id: u32 }),
+  z.strictObject({ kind: z.literal('write'), id: resourceId, bytes: data }),
+  z.strictObject({ kind: z.literal('read'), id: resourceId, max: readSize }),
+  z.strictObject({ kind: z.literal('size'), id: resourceId }),
+  z.strictObject({ kind: z.literal('readAt'), id: resourceId, offset: u32, max: readSize }),
+  z.strictObject({ kind: z.literal('writeAt'), id: resourceId, offset: u32, bytes: data }),
+  z.strictObject({ kind: z.literal('close'), id: resourceId }),
 ]);
 
 export const fileReplySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('ok') }),
-  z.strictObject({ kind: z.literal('opened'), id: u32 }),
-  z.strictObject({ kind: z.literal('bytes'), bytes }),
-  z.strictObject({ kind: z.literal('fail'), code: u32, message: z.string() }),
+  z.strictObject({ kind: z.literal('opened'), id: resourceId }),
+  z.strictObject({ kind: z.literal('bytes'), bytes: data }),
+  failure,
   z.strictObject({ kind: z.literal('missing') }),
   z.strictObject({ kind: z.literal('size'), value: u32 }),
   z.strictObject({ kind: z.literal('invalidCommand') }),

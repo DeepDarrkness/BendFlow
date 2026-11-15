@@ -15,8 +15,7 @@ def mark(path: String) -> IO(Result<&1, &1, U32 & String, U32>):
   import "./custom-mark.js"
 
 def encode_fail(error: U32 & String) -> List<&2, U32>:
-  (code, message) = error
-  2 <> List.append(&2, U32, Bytes.encode_u32(code), Bytes.encode_text(message))
+  Bytes.encode_error(error)
 
 def marked(result: Result<&1, &1, U32 & String, U32>) -> List<&2, U32>:
   match result:

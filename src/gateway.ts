@@ -1,32 +1,57 @@
 import { createServer } from 'node:http';
 import { implement, ORPCError } from '@orpc/server';
 import { RPCHandler, BodyLimitPlugin } from '@orpc/server/node';
-import { numericContract } from '../contracts/numeric.ts';
-import { NativeApp } from './app.ts';
-import { numericCodec } from './protocol/apps.ts';
-import { capabilities, kindExecutable } from './kinds.ts';
-import { WorkerError, type WorkerOptions } from './worker.ts';
+import { appsContract } from '../contracts/apps.ts';
+import { numericReplySchema } from '../contracts/numeric.ts';
+import { collectionReplySchema } from '../contracts/collection.ts';
+import { fileReplySchema } from '../contracts/file.ts';
+import { networkReplySchema } from '../contracts/network.ts';
+import { taskReplySchema } from '../contracts/task.ts';
+import { processReplySchema } from '../contracts/process.ts';
+import { computeReplySchema } from '../contracts/compute.ts';
+import { customReplySchema } from '../contracts/custom.ts';
+import { AppSessions, SessionLookupError, SessionLimitError } from './apps.ts';
+import { capabilities } from './kinds.ts';
+import { WorkerError } from './worker.ts';
+import { byteSerializer } from './protocol/json.ts';
 
-export async function startNumericGateway(options: {
-  port?: number;
-  worker?: Omit<WorkerOptions, 'contract'>;
-} = {}) {
-  const session = await NativeApp.start(numericCodec, options.worker ?? { executable: kindExecutable('numeric') });
-  const implementation = implement(numericContract);
-  const router = implementation.router({
-    command: implementation.command.handler(async ({ input }) => {
-      try { return await session.command(input); }
-      catch (error) {
-        if (!(error instanceof WorkerError)) throw error;
-        if (error.code === 'BUSY') throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message });
-        if (error.code === 'DEADLINE') throw new ORPCError('GATEWAY_TIMEOUT', { message: error.message });
-        throw new ORPCError('SERVICE_UNAVAILABLE', { message: error.message });
-      }
-    }),
+async function rpc<Result>(action: () => Promise<Result>): Promise<Result> {
+  try { return await action(); }
+  catch (error) {
+    if (error instanceof SessionLookupError) throw new ORPCError('NOT_FOUND', { message: error.message });
+    if (error instanceof SessionLimitError) throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message });
+    if (!(error instanceof WorkerError)) throw error;
+    if (error.code === 'BUSY') throw new ORPCError('TOO_MANY_REQUESTS', { message: error.message });
+    if (error.code === 'DEADLINE') throw new ORPCError('GATEWAY_TIMEOUT', { message: error.message });
+    throw new ORPCError('SERVICE_UNAVAILABLE', { message: error.message });
+  }
+}
+
+export async function startAppGateway(options: ConstructorParameters<typeof AppSessions>[0] & { port?: number } = {}) {
+  const sessions = new AppSessions(options);
+  const impl = implement(appsContract);
+  const router = impl.router({
+    sessions: {
+      create: impl.sessions.create.handler(({ input }) => rpc(() => sessions.create(input))),
+      close: impl.sessions.close.handler(({ input }) => rpc(async () => {
+        await sessions.closeSession(input.sessionId);
+        return { kind: 'ok' as const };
+      })),
+    },
+    numeric: { command: impl.numeric.command.handler(({ input }) => rpc(() => sessions.command('numeric', input.sessionId, input.command, numericReplySchema))) },
+    collection: { command: impl.collection.command.handler(({ input }) => rpc(() => sessions.command('collection', input.sessionId, input.command, collectionReplySchema))) },
+    file: { command: impl.file.command.handler(({ input }) => rpc(() => sessions.command('file', input.sessionId, input.command, fileReplySchema))) },
+    network: { command: impl.network.command.handler(({ input }) => rpc(() => sessions.command('network', input.sessionId, input.command, networkReplySchema))) },
+    task: { command: impl.task.command.handler(({ input }) => rpc(() => sessions.command('task', input.sessionId, input.command, taskReplySchema))) },
+    process: { command: impl.process.command.handler(({ input }) => rpc(() => sessions.command('process', input.sessionId, input.command, processReplySchema))) },
+    compute: { command: impl.compute.command.handler(({ input }) => rpc(() => sessions.command('compute', input.sessionId, input.command, computeReplySchema))) },
+    custom: { command: impl.custom.command.handler(({ input }) => rpc(() => sessions.command('custom', input.sessionId, input.command, customReplySchema))) },
   });
-  const handler = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 1024 })] });
+  const handler = new RPCHandler(router, {
+    plugins: [new BodyLimitPlugin({ maxBodySize: 4096 })], customJsonSerializers: [byteSerializer],
+  });
   const server = createServer((request, response) => {
-    if (request.url === '/capabilities') {
+    if (request.method === 'GET' && request.url === '/capabilities') {
       response.setHeader('content-type', 'application/json');
       response.end(JSON.stringify(capabilities()));
       return;
@@ -45,22 +70,19 @@ export async function startNumericGateway(options: {
       server.once('error', reject);
       server.listen(options.port ?? 0, '127.0.0.1', resolve);
     });
-  } catch (error) {
-    await session.close();
-    throw error;
-  }
+  } catch (error) { await sessions.close(); throw error; }
   const address = server.address();
   if (!address || typeof address === 'string') throw new Error('Expected an IPv4 gateway');
   let cleanup: Promise<void> | undefined;
   return {
     url: `http://127.0.0.1:${address.port}/rpc`,
     origin: `http://127.0.0.1:${address.port}`,
-    workerPid: session.pid,
+    get workerPids() { return sessions.workerPids; },
     close(): Promise<void> {
       cleanup ??= (async () => {
         const stopped = new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
         server.closeAllConnections();
-        await Promise.all([session.close(), stopped]);
+        await Promise.all([sessions.close(), stopped]);
       })();
       return cleanup;
     },

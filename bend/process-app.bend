@@ -15,11 +15,10 @@ def initial() -> State:
   ProcessIdle{}
 
 def encode_fail(error: U32 & String) -> List<&2, U32>:
-  (code, message) = error
-  2 <> List.append(&2, U32, Bytes.encode_u32(code), Bytes.encode_text(message))
+  Bytes.encode_error(error)
 
 def encode_text(tag: U32, text: String) -> List<&2, U32>:
-  tag <> Bytes.encode_text(text)
+  Bytes.text_reply(tag, text)
 
 def encode_u32(tag: U32, n: U32) -> List<&2, U32>:
   tag <> Bytes.encode_u32(n)
@@ -45,6 +44,13 @@ def env_reply(result: Result<&1, &1, U32 & String, String>) -> List<&2, U32>:
     case Done{value}:
       encode_text(1, value)
 
+def run_reply_bounded(fits: Bool, code: U32, out: List<&2, U32>, err: List<&2, U32>) -> List<&2, U32>:
+  match fits:
+    case False{}:
+      encode_fail((75, "reply exceeds text bound"))
+    case True{}:
+      3 <> List.append(&2, U32, Bytes.encode_u32(code), List.append(&2, U32, Bytes.encode_len_bytes(out), Bytes.encode_len_bytes(err)))
+
 def run_reply(result: Result<&1, &1, U32 & String, U32 & (String & String)>) -> List<&2, U32>:
   match result:
     case Fail{error}:
@@ -52,7 +58,9 @@ def run_reply(result: Result<&1, &1, U32 & String, U32 & (String & String)>) -> 
     case Done{got}:
       (code, streams) = got
       (out, err) = streams
-      3 <> List.append(&2, U32, Bytes.encode_u32(code), List.append(&2, U32, Bytes.encode_text(out), Bytes.encode_text(err)))
+      +out_bytes = Bytes.encode_text.go(out, [])
+      +err_bytes = Bytes.encode_text.go(err, [])
+      run_reply_bounded(Bool.and(Nat.is_le(List.length(&2, U32, out_bytes), 96n), Nat.is_le(List.length(&2, U32, err_bytes), 96n)), code, out_bytes, err_bytes)
 
 def random_reply(result: Result<&1, &1, U32 & String, U32>) -> List<&2, U32>:
   match result:

@@ -10,7 +10,7 @@ const executable = resolve('build/task-worker');
 
 async function app(t: TestContext, callMs = 4000) {
   const session = await NativeApp.start(taskCodec, { executable, callMs });
-  t.after(async () => { await bounded(session.close(), 5000); if (session.pid) try { assertGone(session.pid); } catch {} });
+  t.after(async () => { await bounded(session.close(), 5000); assertGone(session.pid); });
   return session;
 }
 

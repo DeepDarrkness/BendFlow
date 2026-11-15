@@ -8,7 +8,17 @@ import {
 } from '../../contracts/numeric.ts';
 import { BytesReader, BytesWriter, natText, parseNatText } from './bytes.ts';
 import { ProtocolError } from './framing.ts';
-import type { AppCodec } from '../app.ts';
+import { validatedCodec } from '../app.ts';
+import { networkCommandSchema, networkReplySchema, type NetworkCommand, type NetworkReply } from '../../contracts/network.ts';
+import { taskCommandSchema, taskReplySchema, type TaskCommand, type TaskReply } from '../../contracts/task.ts';
+import { processCommandSchema, processReplySchema, type ProcessCommand, type ProcessReply } from '../../contracts/process.ts';
+import { computeCommandSchema, computeReplySchema, type ComputeCommand, type ComputeReply } from '../../contracts/compute.ts';
+import { customCommandSchema, customReplySchema, type CustomCommand, type CustomReply } from '../../contracts/custom.ts';
+export type { NetworkCommand, NetworkReply } from '../../contracts/network.ts';
+export type { TaskCommand, TaskReply } from '../../contracts/task.ts';
+export type { ProcessCommand, ProcessReply } from '../../contracts/process.ts';
+export type { ComputeCommand, ComputeReply } from '../../contracts/compute.ts';
+export type { CustomCommand, CustomReply } from '../../contracts/custom.ts';
 
 const ORDER = ['lt', 'eq', 'gt'] as const;
 
@@ -32,7 +42,7 @@ export const PROCESS_CONTRACT = 'BendFlow/process/v1';
 export const COMPUTE_CONTRACT = 'BendFlow/compute/v1';
 export const CUSTOM_CONTRACT = 'BendFlow/custom/v1';
 
-export const numericCodec: AppCodec<NumericCommand, NumericReply> = {
+export const numericCodec = validatedCodec<NumericCommand, NumericReply>({
   contract: NUMERIC_CONTRACT,
   parse: input => numericCommandSchema.parse(input),
   encode(command) {
@@ -77,9 +87,9 @@ export const numericCodec: AppCodec<NumericCommand, NumericReply> = {
     }
     throw new ProtocolError('Malformed numeric result');
   },
-};
+}, numericReplySchema);
 
-export const collectionCodec: AppCodec<CollectionCommand, CollectionReply> = {
+export const collectionCodec = validatedCodec<CollectionCommand, CollectionReply>({
   contract: COLLECTION_CONTRACT,
   parse: input => collectionCommandSchema.parse(input),
   encode(command) {
@@ -108,9 +118,9 @@ export const collectionCodec: AppCodec<CollectionCommand, CollectionReply> = {
     if (tag === 5) { const items = reader.u32s(); reader.finish(); return collectionReplySchema.parse({ kind: 'items', items }); }
     throw new ProtocolError('Malformed collection result');
   },
-};
+}, collectionReplySchema);
 
-export const fileCodec: AppCodec<FileCommand, FileReply> = {
+export const fileCodec = validatedCodec<FileCommand, FileReply>({
   contract: FILE_CONTRACT,
   parse: input => fileCommandSchema.parse(input),
   encode(command) {
@@ -137,31 +147,11 @@ export const fileCodec: AppCodec<FileCommand, FileReply> = {
     if (tag === 4) { const value = reader.u32(); reader.finish(); return { kind: 'size', value }; }
     throw new ProtocolError('Malformed file result');
   },
-};
+}, fileReplySchema);
 
-export type NetworkCommand =
-  | { kind: 'connect'; host: string; port: number }
-  | { kind: 'send'; id: number; bytes: Uint8Array }
-  | { kind: 'recv'; id: number; max: number }
-  | { kind: 'close'; id: number }
-  | { kind: 'bind'; host: string; port: number }
-  | { kind: 'sendTo'; id: number; host: string; port: number; bytes: Uint8Array }
-  | { kind: 'recvFrom'; id: number; max: number; ms: number };
-
-export type NetworkReply =
-  | { kind: 'ok' }
-  | { kind: 'opened'; id: number }
-  | { kind: 'bytes'; bytes: Uint8Array }
-  | { kind: 'fail'; code: number; message: string }
-  | { kind: 'missing' }
-  | { kind: 'eof' }
-  | { kind: 'dgram'; host: string; port: number; bytes: Uint8Array }
-  | { kind: 'timeout' }
-  | { kind: 'invalidCommand' };
-
-export const networkCodec: AppCodec<NetworkCommand, NetworkReply> = {
+export const networkCodec = validatedCodec<NetworkCommand, NetworkReply>({
   contract: NETWORK_CONTRACT,
-  parse: input => input as NetworkCommand,
+  parse: input => networkCommandSchema.parse(input),
   encode(command) {
     const out = new BytesWriter();
     switch (command.kind) {
@@ -194,25 +184,11 @@ export const networkCodec: AppCodec<NetworkCommand, NetworkReply> = {
     if (tag === 7) { reader.finish(); return { kind: 'timeout' }; }
     throw new ProtocolError('Malformed network result');
   },
-};
+}, networkReplySchema);
 
-export type TaskCommand =
-  | { kind: 'nap'; ms: number }
-  | { kind: 'start'; ms: number; text: string }
-  | { kind: 'join'; id: number }
-  | { kind: 'timeout'; limit: number; ms: number; text: string };
-
-export type TaskReply =
-  | { kind: 'ok' }
-  | { kind: 'started'; id: number }
-  | { kind: 'text'; text: string }
-  | { kind: 'missing' }
-  | { kind: 'timeout' }
-  | { kind: 'invalidCommand' };
-
-export const taskCodec: AppCodec<TaskCommand, TaskReply> = {
+export const taskCodec = validatedCodec<TaskCommand, TaskReply>({
   contract: TASK_CONTRACT,
-  parse: input => input as TaskCommand,
+  parse: input => taskCommandSchema.parse(input),
   encode(command) {
     const out = new BytesWriter();
     switch (command.kind) {
@@ -233,24 +209,11 @@ export const taskCodec: AppCodec<TaskCommand, TaskReply> = {
     if (tag === 5) { reader.finish(); return { kind: 'timeout' }; }
     throw new ProtocolError('Malformed task result');
   },
-};
+}, taskReplySchema);
 
-export type ProcessCommand =
-  | { kind: 'env'; name: string }
-  | { kind: 'args' }
-  | { kind: 'run'; program: string; arg: string; input: string }
-  | { kind: 'random' };
-
-export type ProcessReply =
-  | { kind: 'text'; text: string }
-  | { kind: 'run'; code: number; stdout: string; stderr: string }
-  | { kind: 'random'; value: number }
-  | { kind: 'fail'; code: number; message: string }
-  | { kind: 'invalidCommand' };
-
-export const processCodec: AppCodec<ProcessCommand, ProcessReply> = {
+export const processCodec = validatedCodec<ProcessCommand, ProcessReply>({
   contract: PROCESS_CONTRACT,
-  parse: input => input as ProcessCommand,
+  parse: input => processCommandSchema.parse(input),
   encode(command) {
     const out = new BytesWriter();
     switch (command.kind) {
@@ -276,18 +239,11 @@ export const processCodec: AppCodec<ProcessCommand, ProcessReply> = {
     if (tag === 4) { const value = reader.u32(); reader.finish(); return { kind: 'random', value }; }
     throw new ProtocolError('Malformed process result');
   },
-};
+}, processReplySchema);
 
-export type ComputeCommand = { kind: 'sum'; items: number[] } | { kind: 'threads' } | { kind: 'frame' };
-export type ComputeReply =
-  | { kind: 'sum'; value: number }
-  | { kind: 'threads'; value: number }
-  | { kind: 'pixels'; items: number[] }
-  | { kind: 'invalidCommand' };
-
-export const computeCodec: AppCodec<ComputeCommand, ComputeReply> = {
+export const computeCodec = validatedCodec<ComputeCommand, ComputeReply>({
   contract: COMPUTE_CONTRACT,
-  parse: input => input as ComputeCommand,
+  parse: input => computeCommandSchema.parse(input),
   encode(command) {
     const out = new BytesWriter();
     if (command.kind === 'sum') return out.u8(0).u32s(command.items).toBuffer();
@@ -303,14 +259,11 @@ export const computeCodec: AppCodec<ComputeCommand, ComputeReply> = {
     if (tag === 2) { const items = reader.u32s(); reader.finish(); return { kind: 'pixels', items }; }
     throw new ProtocolError('Malformed compute result');
   },
-};
+}, computeReplySchema);
 
-export type CustomCommand = { kind: 'mark'; path: string };
-export type CustomReply = { kind: 'marked'; value: number } | { kind: 'fail'; code: number; message: string } | { kind: 'invalidCommand' };
-
-export const customCodec: AppCodec<CustomCommand, CustomReply> = {
+export const customCodec = validatedCodec<CustomCommand, CustomReply>({
   contract: CUSTOM_CONTRACT,
-  parse: input => input as CustomCommand,
+  parse: input => customCommandSchema.parse(input),
   encode: command => new BytesWriter().u8(0).text(command.path).toBuffer(),
   decode(payload) {
     const reader = new BytesReader(payload);
@@ -320,4 +273,4 @@ export const customCodec: AppCodec<CustomCommand, CustomReply> = {
     if (tag === 2) return fail(reader);
     throw new ProtocolError('Malformed custom result');
   },
-};
+}, customReplySchema);

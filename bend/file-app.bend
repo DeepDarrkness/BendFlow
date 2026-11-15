@@ -18,8 +18,7 @@ def initial() -> State:
   Files{1, Map.new(&1, File)}
 
 def encode_fail(error: U32 & String) -> List<&2, U32>:
-  (code, message) = error
-  2 <> List.append(&2, U32, Bytes.encode_u32(code), Bytes.encode_text(message))
+  Bytes.encode_error(error)
 
 def encode_id(id: U32) -> List<&2, U32>:
   0 <> Bytes.encode_u32(id)
@@ -200,8 +199,8 @@ def take_read_max(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{max, more}}:
-      finish_read(Bytes.finished(more), id, max)
+    case Some{Bytes.SplitU32{+max, more}}:
+      finish_read(Bool.and(Bytes.finished(more), U32.is_le(max, 192)), id, max)
 
 def take_read(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
@@ -235,8 +234,8 @@ def take_read_at_max(id: U32, offset: U32, got: Maybe<&2, Bytes.SplitU32>) -> Ma
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{max, more}}:
-      finish_read_at(Bytes.finished(more), id, offset, max)
+    case Some{Bytes.SplitU32{+max, more}}:
+      finish_read_at(Bool.and(Bytes.finished(more), U32.is_le(max, 192)), id, offset, max)
 
 def take_read_at_off(id: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:

@@ -1,9 +1,7 @@
 import { MAX_PAYLOAD, ProtocolError } from './framing.ts';
 
-export const MAX_NAT = (1n << 48n) - 1n;
-export const MAX_TEXT = 96;
-export const MAX_BYTES = 192;
-export const MAX_ITEMS = 32;
+import { MAX_NAT, MAX_TEXT, MAX_BYTES, MAX_ITEMS } from '../../contracts/values.ts';
+export { MAX_NAT, MAX_TEXT, MAX_BYTES, MAX_ITEMS } from '../../contracts/values.ts';
 
 export class BytesReader {
   #buffer: Buffer;
@@ -57,9 +55,8 @@ export class BytesReader {
 
   text(max = MAX_TEXT): string {
     const value = this.bytes(max);
-    const text = value.toString('utf8');
-    if (Buffer.byteLength(text, 'utf8') !== value.length) throw new ProtocolError('Invalid UTF-8');
-    return text;
+    try { return new TextDecoder('utf-8', { fatal: true, ignoreBOM: true }).decode(value); }
+    catch (error) { throw new ProtocolError('Invalid UTF-8', { cause: error }); }
   }
 
   u32s(max = MAX_ITEMS): number[] {
@@ -124,6 +121,7 @@ export class BytesWriter {
   }
 
   text(value: string, max = MAX_TEXT): this {
+    if (!value.isWellFormed()) throw new ProtocolError('Invalid Unicode text');
     const encoded = Buffer.from(value, 'utf8');
     if (encoded.length > max) throw new ProtocolError('Text exceeds bound');
     return this.bytes(encoded, max);

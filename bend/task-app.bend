@@ -102,8 +102,8 @@ def take_nap(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
-    case Some{Bytes.SplitU32{ms, more}}:
-      finish_nap(Bytes.finished(more), ms)
+    case Some{Bytes.SplitU32{+ms, more}}:
+      finish_nap(Bool.and(Bytes.finished(more), U32.is_le(ms, 10000)), ms)
 
 def finish_start(ok: Bool, ms: U32, text: String) -> Maybe<&2, Command>:
   match ok:
@@ -112,12 +112,12 @@ def finish_start(ok: Bool, ms: U32, text: String) -> Maybe<&2, Command>:
     case False{}:
       None{}
 
-def take_start_text(ms: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
+def take_start_text(+ms: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
     case Some{Bytes.SplitText{text, more}}:
-      finish_start(Bytes.finished(more), ms, text)
+      finish_start(Bool.and(Bytes.finished(more), U32.is_le(ms, 10000)), ms, text)
 
 def take_start(got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:
@@ -147,12 +147,12 @@ def finish_timeout(ok: Bool, limit: U32, ms: U32, text: String) -> Maybe<&2, Com
     case False{}:
       None{}
 
-def take_timeout_text(limit: U32, ms: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
+def take_timeout_text(+limit: U32, +ms: U32, got: Maybe<&2, Bytes.SplitText>) -> Maybe<&2, Command>:
   match got:
     case None{}:
       None{}
     case Some{Bytes.SplitText{text, more}}:
-      finish_timeout(Bytes.finished(more), limit, ms, text)
+      finish_timeout(Bool.and(Bytes.finished(more), Bool.and(U32.is_le(limit, 10000), U32.is_le(ms, 10000))), limit, ms, text)
 
 def take_timeout_ms(limit: U32, got: Maybe<&2, Bytes.SplitU32>) -> Maybe<&2, Command>:
   match got:

@@ -18,11 +18,7 @@ This report evaluates [the REPL proposal](bend-node-repl.md), Bend's checker, an
 
 Research date: 2026-11-15. The local toolchain is upstream revision `f0cf0a7c573145501981c44d9c33e326185f008e`. The requested `main` BendTT PDF and the pinned PDF were byte-identical at retrieval. Paper references below use its printed page numbers, which match PDF page numbers. [1]
 
-I inspected the parser, incremental validator, dependent inference, hole checking, and normalizer. I also reviewed the paper and kernel validation structure. I ran 12 focused probes against the actual TypeScript checker under Node v24.11.0. The probes are retained in [`scripts/check-bend-incremental.mjs`](../scripts/check-bend-incremental.mjs):
-
-```sh
-node scripts/check-bend-incremental.mjs
-```
+I inspected the parser, incremental validator, dependent inference, hole checking, and normalizer. I also reviewed the paper and kernel validation structure. I ran 12 focused probes against the actual TypeScript checker under Node v24.11.0. The temporary probe script and downloaded research files were removed after the assessment at the user's request.
 
 All 12 passed. These probes establish the behaviors listed below, not a complete interactive checker or a cache-correctness theorem. No latency measurements were taken. The Lean mechanization was not independently rebuilt.
 

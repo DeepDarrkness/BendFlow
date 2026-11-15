@@ -11,7 +11,7 @@
     "setup:clang": "node scripts/setup-clang.ts",
     "build:native": "node scripts/build-native.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:native && node --test --test-concurrency=1 --test-timeout=20000 tests/*.test.ts tests/phase2/*.test.ts",
+    "test": "npm run build:native && node --test --test-concurrency=1 --test-timeout=20000 --test-reporter=spec --test-reporter=./scripts/conformance-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=build/phase2-results.json tests/*.test.ts tests/phase2/*.test.ts",
     "example": "node examples/echo.ts",
     "example:session": "node examples/session.ts"
   },

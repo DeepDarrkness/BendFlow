@@ -3,6 +3,7 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { bun, clang, revision, run, source } from './toolchain.ts';
 import { CPU_ARGS } from '../src/runtime.ts';
+import { SESSION_KINDS } from '../src/kinds.ts';
 
 assert.equal(process.versions.node.split('.')[0], '24', 'Node 24 LTS is required');
 assert.equal(run('git', ['rev-parse', 'HEAD'], source), revision, 'Run npm run setup:bend to pin the compiler');
@@ -21,14 +22,7 @@ for (const [input, output] of [
   ['bend/session-worker.bend', 'session-worker'],
   ['tests/fixtures/session-cases.bend', 'session-cases'],
   ['tests/fixtures/phase2/bytes-check.bend', 'bytes-check'],
-  ['bend/numeric-worker.bend', 'numeric-worker'],
-  ['bend/collection-worker.bend', 'collection-worker'],
-  ['bend/file-worker.bend', 'file-worker'],
-  ['bend/network-worker.bend', 'network-worker'],
-  ['bend/task-worker.bend', 'task-worker'],
-  ['bend/process-worker.bend', 'process-worker'],
-  ['bend/compute-worker.bend', 'compute-worker'],
-  ['bend/custom-worker.bend', 'custom-worker'],
+  ...SESSION_KINDS.map(kind => [`bend/${kind}-worker.bend`, `${kind}-worker`]),
 ]) {
   if (!input || !output) throw new Error('Invalid build target');
   if (output !== 'custom-worker') {

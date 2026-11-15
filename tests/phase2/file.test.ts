@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import test, { type TestContext } from 'node:test';
 import { NativeApp } from '../../src/app.ts';
 import { fileCodec } from '../../src/protocol/apps.ts';
+import { BytesWriter } from '../../src/protocol/bytes.ts';
 import { assertGone, bounded } from '../helpers.ts';
 
 const executable = resolve('build/file-worker');
@@ -87,4 +88,24 @@ test('exclusive create fails when the path exists and later commands still work'
   assert.equal(failed.kind, 'fail');
   const opened = await session.command({ kind: 'open', path, mode: 'r' });
   assert.equal(opened.kind, 'opened');
+});
+
+test('raw oversized file reads are rejected before advancing the retained handle', async t => {
+  const dir = await scratch(t);
+  const path = join(dir, 'bounded.bin');
+  await writeFile(path, Buffer.alloc(200, 7));
+  const session = await app(t);
+  const opened = await session.command({ kind: 'open', path, mode: 'r' });
+  if (opened.kind !== 'opened') throw new Error('expected opened');
+  const reads = [
+    new BytesWriter().u8(2).u32(opened.id).u32(193).toBuffer(),
+    new BytesWriter().u8(4).u32(opened.id).u32(0).u32(193).toBuffer(),
+  ];
+  for (const raw of reads) assert.deepEqual(fileCodec.decode(await session.raw(raw)), { kind: 'invalidCommand' });
+  const first = await session.command({ kind: 'read', id: opened.id, max: 192 });
+  if (first.kind !== 'bytes') throw new Error('expected bytes');
+  assert.deepEqual(first.bytes, Buffer.alloc(192, 7));
+  const last = await session.command({ kind: 'read', id: opened.id, max: 192 });
+  if (last.kind !== 'bytes') throw new Error('expected bytes');
+  assert.deepEqual(last.bytes, Buffer.alloc(8, 7));
 });
