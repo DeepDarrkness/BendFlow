@@ -1,0 +1,25 @@
+{
+  "sessions": [
+    { "kind": "numeric", "command": "accumulate/add/parse/show/f32Add/compare/bits", "profile": "native-cpu", "evidence": "tests/phase2/numeric.test.ts" },
+    { "kind": "collection", "command": "put/get/del/setItems/mapInc/sort/arraySet/arrayGet", "profile": "native-cpu", "evidence": "tests/phase2/collection.test.ts" },
+    { "kind": "file", "command": "open/write/read/size/readAt/writeAt/close", "profile": "native-cpu", "evidence": "tests/phase2/file.test.ts independent fs.readFile" },
+    { "kind": "network", "command": "connect/send/recv/bind/sendTo/recvFrom", "profile": "native-cpu", "evidence": "tests/phase2/network.test.ts independent TCP/UDP peers" },
+    { "kind": "task", "command": "start/join/timeout", "profile": "native-cpu", "evidence": "tests/phase2/task.test.ts worker stdout after IO.within" },
+    { "kind": "process", "command": "env/args/run/random", "profile": "native-cpu", "evidence": "tests/phase2/process.test.ts /bin/echo stdout and /bin/ls stderr" },
+    { "kind": "compute", "command": "sum/threads/frame", "profile": "native-cpu+multithreaded-cpu", "evidence": "tests/phase2/compute.test.ts thread_count plus CPU Image pixels" },
+    { "kind": "custom", "command": "mark", "profile": "native-cpu", "evidence": "tests/phase2/custom.test.ts marker file" }
+  ],
+  "profiles": [
+    { "profile": "native-cpu", "status": "verified", "evidence": "required; every session test" },
+    { "profile": "multithreaded-cpu", "status": "verified", "evidence": "tests/phase2/compute.test.ts threads=4" },
+    { "profile": "gpu", "status": "unavailable", "evidence": "no device instrumentation on this machine" },
+    { "profile": "graphics-audio", "status": "unavailable", "evidence": "no window/audio fixture on this machine" }
+  ],
+  "compiler": [
+    { "feature": "affine-state-duplication", "evidence": "tests/phase2/compiler.test.ts duplicate-numeric-state.bend" },
+    { "feature": "computed-match", "evidence": "tests/phase2/compiler.test.ts computed-match.bend" },
+    { "feature": "non-decreasing-recursion", "evidence": "tests/phase2/compiler.test.ts non-decreasing.bend" },
+    { "feature": "erased-binder", "evidence": "tests/phase2/compiler.test.ts erased-binder.bend" },
+    { "feature": "bounded-codec", "evidence": "tests/fixtures/phase2/bytes-check.bend" }
+  ]
+}

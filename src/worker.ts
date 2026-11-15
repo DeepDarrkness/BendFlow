@@ -2,7 +2,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 import { createConnection, createServer, type Socket } from 'node:net';
 import { setTimeout as delay } from 'node:timers/promises';
 import { CONTRACT, ECHO_OPERATION, MAX_PAYLOAD, encodeFrame, FrameDecoder, ProtocolError, type Frame } from './protocol/framing.ts';
-import { CPU_ARGS } from './runtime.ts';
+import { CPU_ARGS, type ExecutionProfile, runtimeArgs } from './runtime.ts';
 
 export class WorkerError extends Error {
   readonly code: 'STARTUP' | 'UNAVAILABLE' | 'BUSY' | 'DEADLINE' | 'PROTOCOL' | 'CLOSED';
@@ -19,6 +19,10 @@ export type WorkerOptions = {
   startupMs?: number;
   callMs?: number;
   terminationGraceMs?: number;
+  contract?: string;
+  profile?: ExecutionProfile;
+  threads?: number;
+  env?: NodeJS.ProcessEnv;
 };
 
 export async function availablePort(): Promise<number> {
@@ -57,8 +61,9 @@ export class BendWorker {
 
   private constructor(options: Required<WorkerOptions>) {
     this.#options = options;
-    this.#child = spawn(options.executable, [...CPU_ARGS, String(options.port)], {
-      stdio: ['ignore', 'pipe', 'pipe'], env: { ...process.env, BENDRTS: '', BEND_NO_TELEMETRY: '1' },
+    this.#child = spawn(options.executable, [...runtimeArgs(options.profile, options.threads), String(options.port)], {
+      stdio: ['ignore', 'pipe', 'pipe'],
+      env: { ...process.env, ...options.env, BENDRTS: '', BEND_NO_TELEMETRY: '1' },
     });
     const drain = (chunk: Buffer) => {
       this.#diagnostics = Buffer.concat([this.#diagnostics, chunk]).subarray(-8192);
@@ -77,7 +82,12 @@ export class BendWorker {
       executable: options.executable, port: options.port ?? await availablePort(),
       startupMs: options.startupMs ?? 10_000, callMs: options.callMs ?? 2000,
       terminationGraceMs: options.terminationGraceMs ?? 100,
+      contract: options.contract ?? CONTRACT.toString('ascii'),
+      profile: options.profile ?? 'native-cpu',
+      threads: options.threads ?? 2,
+      env: options.env ?? {},
     };
+    if (!/^[\x20-\x7e]+$/.test(config.contract) || config.contract.length > MAX_PAYLOAD) throw new RangeError('Invalid worker contract');
     if (!Number.isInteger(config.port) || config.port < 1 || config.port > 65535) throw new RangeError('Invalid worker port');
     for (const value of [config.startupMs, config.callMs, config.terminationGraceMs]) {
       if (!Number.isInteger(value) || value <= 0 || value > 2_147_483_647) throw new RangeError('Invalid worker deadline');
@@ -86,8 +96,9 @@ export class BendWorker {
     const timer = setTimeout(() => worker.#fail(new WorkerError('STARTUP', 'Worker startup deadline exceeded')), config.startupMs);
     try {
       await worker.#connect();
-      const response = await worker.#exchange({ kind: 1, requestId: 0, operationId: 0, payload: CONTRACT }, 2);
-      if (!response.payload.equals(CONTRACT)) throw new ProtocolError('Incompatible worker contract');
+      const contract = Buffer.from(config.contract, 'ascii');
+      const response = await worker.#exchange({ kind: 1, requestId: 0, operationId: 0, payload: contract }, 2);
+      if (!response.payload.equals(contract)) throw new ProtocolError('Incompatible worker contract');
       if (worker.#failure) throw worker.#failure;
       worker.#state = 'ready';
       return worker;
@@ -159,11 +170,15 @@ export class BendWorker {
     return result.promise;
   }
 
-  async echo(payload: Uint8Array): Promise<Buffer> {
+  echo(payload: Uint8Array): Promise<Buffer> {
+    return this.call(ECHO_OPERATION, payload);
+  }
+
+  async call(operationId: number, payload: Uint8Array): Promise<Buffer> {
     if (this.#state === 'busy') throw new WorkerError('BUSY', 'Worker is busy');
     if (this.#state !== 'ready') throw new WorkerError('UNAVAILABLE', 'Worker is unavailable', { cause: this.#failure });
     if (payload.byteLength > MAX_PAYLOAD) throw new ProtocolError('Frame exceeds 256-byte body limit');
-    const frame: Frame = { kind: 3, requestId: this.#nextId, operationId: ECHO_OPERATION, payload: Buffer.from(payload) };
+    const frame: Frame = { kind: 3, requestId: this.#nextId, operationId, payload: Buffer.from(payload) };
     encodeFrame(frame);
     this.#nextId = this.#nextId === 0xffffffff ? 1 : this.#nextId + 1;
     this.#state = 'busy';

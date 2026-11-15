@@ -4,15 +4,6 @@ import ./transport.bend as Transport
 def contract() -> List<&2, U32>:
   [66, 101, 110, 100, 70, 108, 111, 119, 47, 101, 99, 104, 111, 47, 118, 49]
 
-def bytes_equal(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
-  match a b:
-    case Nil{} Nil{}:
-      True{}
-    case x <> xs y <> ys:
-      Bool.and(U32.is_eq(x, y), bytes_equal(xs, ys))
-    case _ _:
-      False{}
-
 def reply(s: Socket, valid: Bool, frame: Transport.Frame, next: Socket -> IO(Unit)) -> IO(Unit):
   match valid:
     case False{}:
@@ -28,7 +19,7 @@ def dispatch(s: Socket, frame: Maybe<&2, Transport.Frame>, ready: Bool, next: So
       match ready:
         case False{}:
           reply(s, Bool.and(Bool.and(U32.is_eq(kind, 1), U32.is_eq(id, 0)),
-            Bool.and(U32.is_eq(op, 0), bytes_equal(payload, contract()))),
+            Bool.and(U32.is_eq(op, 0), Transport.bytes_equal(payload, contract()))),
             Transport.Frame{2, 0, 0, contract()}, next)
         case True{}:
           reply(s, Bool.and(U32.is_eq(kind, 3), Bool.and(U32.is_ne(id, 0), U32.is_eq(op, 65535))),

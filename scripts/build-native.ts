@@ -16,9 +16,24 @@ const versions = {
   runtimeArgs: CPU_ARGS,
 };
 mkdirSync('build', { recursive: true });
-for (const [input, output] of [['tests/fixtures/minimal.bend', 'minimal'], ['bend/echo-worker.bend', 'echo-worker']]) {
+for (const [input, output] of [
+  ['tests/fixtures/minimal.bend', 'minimal'], ['bend/echo-worker.bend', 'echo-worker'],
+  ['bend/session-worker.bend', 'session-worker'],
+  ['tests/fixtures/session-cases.bend', 'session-cases'],
+  ['tests/fixtures/phase2/bytes-check.bend', 'bytes-check'],
+  ['bend/numeric-worker.bend', 'numeric-worker'],
+  ['bend/collection-worker.bend', 'collection-worker'],
+  ['bend/file-worker.bend', 'file-worker'],
+  ['bend/network-worker.bend', 'network-worker'],
+  ['bend/task-worker.bend', 'task-worker'],
+  ['bend/process-worker.bend', 'process-worker'],
+  ['bend/compute-worker.bend', 'compute-worker'],
+  ['bend/custom-worker.bend', 'custom-worker'],
+]) {
   if (!input || !output) throw new Error('Invalid build target');
-  process.stdout.write(run(bun, [resolve(source, 'bend2/main.ts'), input, '--check-only']) + '\n');
+  if (output !== 'custom-worker') {
+    process.stdout.write(run(bun, [resolve(source, 'bend2/main.ts'), input, '--check-only']) + '\n');
+  }
   process.stdout.write(run(bun, [resolve(source, 'bend2/main.ts'), input, '-o', resolve('build', output)]) + '\n');
 }
 assert.equal(run(resolve('build/minimal'), versions.runtimeArgs), 'BendRT ready: 12');

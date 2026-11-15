@@ -9,6 +9,15 @@ type ReadResult is Data:
 type Frame is Data:
   Frame{kind: U32, id: U32, operation: U32, payload: List<&2, U32>}
 
+def bytes_equal(a: List<&2, U32>, b: List<&2, U32>) -> Bool:
+  match a b:
+    case Nil{} Nil{}:
+      True{}
+    case x <> xs y <> ys:
+      Bool.and(U32.is_eq(x, y), bytes_equal(xs, ys))
+    case _ _:
+      False{}
+
 def u32be(+n: U32) -> List<&2, U32>:
   [(n >> 24n : U32), ((n >> 16n : U32) .&. 255 : U32), ((n >> 8n : U32) .&. 255 : U32), (n .&. 255 : U32)]
 
