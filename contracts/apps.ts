@@ -10,7 +10,8 @@ import { computeCommandSchema, computeReplySchema } from './compute.ts';
 import { customCommandSchema, customReplySchema } from './custom.ts';
 import { ok } from './values.ts';
 
-export const sessionKindSchema = z.enum(['numeric', 'collection', 'file', 'network', 'task', 'process', 'compute', 'custom']);
+import { sessionKindSchema } from './kinds.ts';
+export { sessionKindSchema } from './kinds.ts';
 export const sessionIdSchema = z.uuid().brand<'SessionId'>();
 export type SessionId = z.infer<typeof sessionIdSchema>;
 export const executionSchema = z.discriminatedUnion('profile', [

@@ -1,23 +1,9 @@
 import { BendWorker, WorkerError, type WorkerOptions } from './worker.ts';
+import { encodeCommand, type AppCodec } from './protocol/codec.ts';
+
+export type { AppCodec } from './protocol/codec.ts';
 
 export const COMMAND_OPERATION = 1;
-
-export type AppCodec<Command, Reply> = {
-  contract: string;
-  parse: (input: unknown) => Command;
-  encode: (command: Command) => Buffer;
-  decode: (payload: Buffer) => Reply;
-};
-
-export function validatedCodec<Command, Reply>(
-  codec: AppCodec<Command, Reply>, reply: { parse: (input: unknown) => Reply },
-): AppCodec<Command, Reply> {
-  return {
-    ...codec,
-    encode: command => codec.encode(codec.parse(command)),
-    decode: payload => reply.parse(codec.decode(payload)),
-  };
-}
 
 export class NativeApp<Command, Reply> {
   #worker: BendWorker;
@@ -42,7 +28,7 @@ export class NativeApp<Command, Reply> {
 
   async command(command: Command): Promise<Reply> {
     if (this.#closing) throw new WorkerError('CLOSED', 'Session is shutting down');
-    const payload = this.#codec.encode(this.#codec.parse(command));
+    const payload = encodeCommand(this.#codec, command);
     const response = await this.#worker.call(COMMAND_OPERATION, payload);
     try { return this.#codec.decode(response); }
     catch (error) {

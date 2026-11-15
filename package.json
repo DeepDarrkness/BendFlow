@@ -7,11 +7,15 @@
     "node": ">=24 <25"
   },
   "scripts": {
-    "setup:bend": "node scripts/setup-bend.ts",
-    "setup:clang": "node scripts/setup-clang.ts",
-    "build:native": "node scripts/build-native.ts",
+    "setup:bend": "node scripts/setup/bend.ts",
+    "setup:clang": "node scripts/setup/clang.ts",
+    "build:native": "node scripts/build/native.ts",
     "typecheck": "tsc --noEmit",
-    "test": "npm run build:native && node --test --test-concurrency=1 --test-timeout=20000 --test-reporter=spec --test-reporter=./scripts/conformance-reporter.ts --test-reporter-destination=stdout --test-reporter-destination=build/phase2-results.json tests/*.test.ts tests/phase2/*.test.ts",
+    "test:unit": "node scripts/test/run.ts unit",
+    "test:integration": "node scripts/test/run.ts integration",
+    "test:compiler": "node scripts/test/run.ts compiler",
+    "test:types": "node scripts/test/run.ts types",
+    "test": "node scripts/test/run.ts full",
     "example": "node examples/echo.ts",
     "example:session": "node examples/session.ts"
   },

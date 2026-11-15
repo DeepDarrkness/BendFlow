@@ -6,6 +6,8 @@ Phase 2 has completed its gateway and validation foundation. All eight session k
 
 The [completion plan](bend-node-phase2-completion-plan.md) orders the remaining work. The feature inventory records pending nested encodings, paging, language features, effect failure sequences, balanced parallel algorithms, and pure-core proofs. Passing the current suite does not establish completion of those requirements.
 
+The current working tree has reorganized scripts and tests. Its inventory loader expects `tests/conformance/coverage.json`, but the retained inventory is still at `tests/phase2/coverage.json` with old test references. A targeted inventory load fails with `ENOENT`. Restore the evidence paths and rerun the checks before treating the recorded passing baseline as current. The completion plan includes this prerequisite as milestone 0.
+
 The implementation includes:
 
 - One native executable per session kind, one process per session, and native `initialize`, `command`, and `shutdown` operations.
@@ -13,8 +15,8 @@ The implementation includes:
 - Strict command and reply schemas for every kind under `contracts/`, validated codecs in `src/protocol/apps.ts`, and `NativeApp` in `src/app.ts`.
 - A session-owning HTTP gateway in `src/gateway.ts` and `src/apps.ts`, and a reply-validating client in `src/client.ts`.
 - Gateway capabilities that list supported session kinds and distinguish available profiles from verified test results.
-- Tests under `tests/phase2/`.
-- A feature-level coverage inventory in `tests/phase2/coverage.json`, with required feature IDs in `scripts/phase2-requirements.ts`.
+- Tests under `tests/unit/`, `tests/integration/`, `tests/compiler/`, and `tests/types/`.
+- A retained feature-level coverage inventory in `tests/phase2/coverage.json`, with required feature IDs in `scripts/conformance/requirements.ts`. The planned inventory destination is `tests/conformance/coverage.json`.
 - An executed-test report in `build/phase2-results.json`. Verified rows require an actual passing test with the referenced file and name.
 
 The foundation also includes:
@@ -38,7 +40,7 @@ Independent fixtures observe the effects:
 
 `f32Add` bitcasts `U32` payloads to `F32`, so NaN follows native bits rather than JSON numbers. The Bend checker rejects duplicated affine numeric state, a match on a computed value, a non-decreasing recursive call, and a live use of an erased binder.
 
-`npx tsc --noEmit` succeeds. `npm test` reports 124 passed, 0 failed, and 0 skipped, and writes the conformance report. Both Phase 1 and Phase 2 tests pass. The verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending.
+The recorded baseline has a successful `npx tsc --noEmit` and an `npm test` run with 124 passed, 0 failed, and 0 skipped. That run passed both Phase 1 and Phase 2 tests and wrote the conformance report. Its verified toolchain is Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40` at `f0cf0a7c573145501981c44d9c33e326185f008e`, and Ubuntu Clang `18.1.3`. The report remains `in-progress` while required features are pending. The reorganized working tree needs a fresh verification run after the inventory paths are repaired.
 
 To reproduce the checks, run:
 
@@ -245,7 +247,7 @@ Maintain a machine-readable coverage inventory mapping each intended feature or 
 
 Phase 2 is complete when every declared supported feature has evidence, and every effect family has a real externally observed test.
 
-The next slice is bounded paging and complete codec vectors, followed by the missing numeric and collection features. The gateway and persistent-file HTTP path are now implemented. Use the [completion plan](bend-node-phase2-completion-plan.md) and the feature inventory to select the next unverified requirement.
+The next slice is restoring the conformance evidence paths, then bounded paging and complete codec vectors, followed by the missing numeric and collection features. The gateway and persistent-file HTTP path are implemented. Use the [completion plan](bend-node-phase2-completion-plan.md) and the feature inventory to select the next unverified requirement.
 
 ## Sources
 
