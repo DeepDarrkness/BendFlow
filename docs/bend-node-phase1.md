@@ -1,12 +1,45 @@
 # BendFlow implementation plan for phases 1 and 2
 
+## Phase 1 completion report
+
+Phase 1 is complete. Real Node → native BendRT → Node request and response exchanges work over one persistent localhost TCP connection.
+
+The implementation includes:
+
+- Bend 2.0.40 pinned to revision `f0cf0a7c573145501981c44d9c33e326185f008e`, with native build scripts.
+- A shared Bend framing module and a native echo worker.
+- Node process ownership, handshake validation, single-call admission, deadlines, and forced cleanup.
+- A runnable example, setup instructions in [the README](README.md), and a [protocol reference](docs/phase1-protocol.md).
+
+TypeScript checks and all **48 tests passed**, with no skipped tests. Coverage includes fragmented and coalesced frames, size limits, malformed messages, startup failures, crashes, and `SIGSTOP` timeout cleanup. Cleanup tests confirm that worker processes exit.
+
+The example completed three exchanges using the same worker PID, `4120`, and returned matching payloads:
+
+```text
+[0, 128, 255] → [0, 128, 255]
+"Hello BendRT" → "Hello BendRT"
+[] → []
+```
+
+The verified toolchain was Node `v24.11.0`, Bun `1.3.3`, Bend `2.0.40`, and Ubuntu Clang `18.1.3`. The native worker ran with `+RTS --threads 1 --gpu off -RTS`.
+
+To reproduce the checks and example, run:
+
+```sh
+npm run typecheck
+npm test
+npm run example
+```
+
+The next phase will broaden testing of Bend functionality through the Node gateway. The Phase 2 plan below currently defines the initial typed `checkedAdd` oRPC call. Its scope needs expansion to reflect that broader coverage goal.
+
 ## Status and scope
 
 This document records the agreed implementation plan for the first vertical slice described in [the wrapper proposal](bend-node-wrap.md).
 
 The slice exposes one pure `checkedAdd` function through a real oRPC endpoint backed by one persistent native Bend worker. It covers typed client calls, automatic datatype conversion, native computation, process cleanup, and tests at every step.
 
-Implementation has not started. This document is the reference for implementation approval. Phases 3, 4, and 5 remain deferred.
+Phase 1 is implemented. The native echo worker, shared framing module, Node process owner, and bounded integration tests establish real Node-to-BendRT round trips. See [the README](README.md) for setup and [the protocol reference](docs/phase1-protocol.md) for exact wire values. Phase 2 remains planned. Phases 3, 4, and 5 remain deferred.
 
 ## 1. Findings from Bend's source
 
@@ -325,7 +358,7 @@ A fatal worker failure or timeout makes the service unavailable until the servic
 
 ## 7. Planned artifacts
 
-The following paths describe planned files, not an existing implementation:
+The following paths describe the target layout for both phases. Phase 1 currently supplies `src/worker.ts`, `src/protocol/framing.ts`, `bend/transport.bend`, `bend/echo-worker.bend`, native build scripts, `tests/`, and `examples/echo.ts`:
 
 ```text
 contracts/             Shared oRPC contract and schemas
