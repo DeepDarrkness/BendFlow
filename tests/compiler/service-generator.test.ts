@@ -9,18 +9,23 @@ import { resolve } from 'node:path';
 
 test('service generator derives external Data fields and authorizes private state through the lifecycle pair', () => {
   const description = inspectServices(projectPath('examples/services/counter.bend'));
-  assert.deepEqual(description.services.map(service => ({ name: service.name, parameter: service.parameter,
-    request: service.request.fields, response: service.response.fields })), [
+  assert.deepEqual(description.services.map(service => {
+    const arg = service.args[0];
+    if (!arg || arg.value.kind !== 'record' || service.reply.kind !== 'record') throw new Error('Expected record boundary');
+    return { name: service.name, parameter: arg.name, request: arg.value.fields.map(field => field.name), response: service.reply.fields.map(field => field.name) };
+  }), [
     { name: 'accumulate', parameter: 'sample', request: ['delta', 'weight'], response: ['running', 'calls'] },
     { name: 'counter', parameter: 'request', request: ['amount'], response: ['value'] },
   ]);
-  assert.equal(description.services[1]?.state, 'CounterState');
+  const counter = description.services[1];
+  assert.ok(counter?.kind === 'stateful');
+  assert.equal(counter.state, 'CounterState');
 });
 
 for (const [fixture, diagnostic] of [
   ['not-data', /api\.bad\.args\.request: Request must be declared is Data, not Type/],
-  ['unsupported-data', /api\.bad\.args\.request\.amount: Nat is not supported Wire Data/],
-  ['dependent', /api\.bad\.args\.request: requires a concrete named type; dependent and function types/],
+  ['unsupported-data', /api\.bad\.args\.request\.amount: Char is not supported Wire Data/],
+  ['dependent', /api\.bad\.args\.request: .*requires a concrete named type; dependent and function types/],
   ['missing-lifecycle', /lifecycle\.finalize\.bad: requires a filled entry-module definition/],
 ] satisfies [string, RegExp][]) {
   test(`service generator rejects compiler-valid ${fixture} before endpoint emission`, async () => {
@@ -36,7 +41,8 @@ test('closed generic internal state and internal datatype names do not change th
   const generic = inspectServices(projectPath('tests/fixtures/services/generic-state.bend')).services[0];
   const plain = inspectServices(projectPath('examples/services/counter.bend')).services.find(service => service.name === 'counter');
   if (!generic || !plain) throw new Error('Expected counter services');
-  assert.equal(generic.state, 'State<U32>');
+   assert.ok(generic.kind === 'stateful');
+   assert.equal(generic.state, 'State<U32>');
   assert.equal(contractId(generic), contractId(plain));
   assert.equal(emitContracts([generic], './sessions.ts'), emitContracts([plain], './sessions.ts'));
 });

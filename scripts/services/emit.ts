@@ -1,80 +1,80 @@
 import { createHash } from 'node:crypto';
 import { basename } from 'node:path';
-import type { ServiceDescription } from './inspect.ts';
+import type { ServiceDescription, WireType } from './inspect.ts';
+import { analyzeWire, checkServiceBounds, maxServiceBodyBytes } from './wire.ts';
+import { bendCodecs, bendType } from './bend-codec.ts';
+import { schema, encode, decode } from './node-codec.ts';
 
 const quote = JSON.stringify;
 
 export function contractId(service: ServiceDescription): string {
-  const wire = { version: 1, policy: 'u32-record-v1', name: service.name, parameter: service.parameter,
-    request: service.request.fields, response: service.response.fields };
-  return `BendFlow/service/v1/${createHash('sha256').update(JSON.stringify(wire)).digest('hex')}`;
+  checkServiceBounds(service);
+  const wire = [2, 'be/exact/utf8-bom/nat48/u8-length/declaration-tags', service.name,
+    service.args.map(field => [field.name, analyzeWire(field.value).canonical]), analyzeWire(service.reply).canonical];
+  return `BendFlow/service/v2/${createHash('sha256').update(JSON.stringify(wire)).digest('hex')}`;
 }
 
-export function emitWorker(service: ServiceDescription, entry: string): string {
-  const request = `Entry.${service.request.type}`;
-  const response = `Entry.${service.response.type}`;
-  const state = service.stateCode;
+export function emitWorker(service: ServiceDescription, entry: string, imports: readonly { alias: string; path: string }[] = []): string {
+  checkServiceBounds(service);
+  const codecs = bendCodecs();
+  const requestShape = service.args.reduceRight<WireType>((right, field) => ({ kind: 'pair', left: field.value, right }), {kind: 'unit'});
+  const requestCodec = codecs.emit(requestShape);
+  const reply = codecs.emit(service.reply);
+  const response = bendType(service.reply);
+  const state = service.kind === 'stateful' ? `(${service.stateCode})` : 'Unit';
   const pair = `${state} & List<&2, U32>`;
-  const words = service.request.fields.map((_, index) => `word(b${index * 4}, b${index * 4 + 1}, b${index * 4 + 2}, b${index * 4 + 3})`);
-  const bytes = service.request.fields.flatMap((_, index) => Array.from({ length: 4 }, (_, offset) => `b${index * 4 + offset}`));
-  const fields = service.response.fields.map((_, index) => `v${index}`);
-  const encoded = fields.reduceRight((tail, field) => `List.append(&2, U32, Bytes.encode_u32(${field}), ${tail})`, '[]');
+  const request = bendType(requestShape);
+  const vars = service.args.map((_, i) => `v${i}`);
+  const pattern = vars.reduceRight((tail, v) => `(${v}, ${tail})`, 'unit');
+  const invocation = `Entry.${service.call}(${[...(service.kind === 'stateful' ? ['state'] : []), ...vars].join(', ')})`;
   return `import Base
 import ./source/${basename(entry)} as Entry
+${imports.map(value => `import ./source/${value.path} as ${value.alias}`).join('\n')}
 import ./runtime/loop.bend as Loop
 import ./runtime/bytes.bend as Bytes
+import ./runtime/wire.bend as Wire
 
 def contract(_: Unit) -> List<&2, U32>:
   [${[...Buffer.from(contractId(service), 'ascii')].join(', ')}]
 
-def word(a: U32, b: U32, c: U32, d: U32) -> U32:
-  (((a << 24n : U32) .|. (b << 16n : U32) : U32) .|. ((c << 8n : U32) .|. d : U32) : U32)
-
-def decode(bytes: List<&2, U32>) -> Maybe<&2, ${request}>:
-  match bytes:
-    case ${bytes.join(' <> ')} <> Nil{}:
-      Some{Entry.${service.request.constructor}{${words.join(', ')}}}
-    case other:
-      None{}
-
-def encode(response: ${response}) -> List<&2, U32>:
-  match response:
-    case Entry.${service.response.constructor}{${fields.join(', ')}}:
-      0 <> ${encoded}
+${codecs.definitions.join('\n')}
 
 def packed(result: ${state} & ${response}) -> ${pair}:
   (state, response) = result
-  (state, encode(response))
+  (state, Wire.envelope(${reply}.encode(response)))
 
-def applied(state: ${state}, request: Maybe<&2, ${request}>) -> IO(${pair}):
+def applied(state: ${state}, request: Maybe<&1, ${request} & List<&2, U32>>) -> IO(${pair}):
   match request:
     case None{}:
       IO.pure(${pair}, (state, Loop.invalid()))
-    case Some{value}:
-      do IO<${pair}>:
-        result : ${state} & ${response} <- Entry.${service.transition}(state, value)
-        return packed(result)
+    case Some{(${pattern}, rest)}:
+      match rest:
+        case Nil{}:
+          do IO<${pair}>:
+${service.kind === 'stateful' ? `            result : ${state} & ${response} <- ${invocation}\n            return packed(result)` : service.kind === 'io' ? `            response : ${response} <- ${invocation}\n            return packed((state, response))` : `            return packed((state, ${invocation}))`}
+        case other:
+          IO.pure(${pair}, (state, Loop.invalid()))
 
 def handle(state: ${state}, op: U32, payload: List<&2, U32>) -> IO(${pair}):
   match op:
     case 1:
-      applied(state, decode(payload))
+      applied(state, ${requestCodec}.decode(payload))
     case other:
       IO.pure(${pair}, (state, Loop.invalid()))
 
 def shutdown(state: ${state}) -> IO(Unit):
-  Entry.${service.finalize}(state)
+  ${service.kind === 'stateful' ? `Entry.${service.finalize}(state)` : 'IO.pure(Unit, Unit{})'}
 
 def main() -> IO(Unit):
   do IO<Unit>:
-    state : ${state} <- Entry.${service.initialize}()
+    state : ${state} <- ${service.kind === 'stateful' ? `Entry.${service.initialize}()` : 'IO.pure(Unit, Unit{})'}
     Loop.run(~${state}, ~handle, ~shutdown, ~contract, ~"usage: ${service.name} PORT", state)
 `;
 }
 
 export function emitContracts(services: readonly ServiceDescription[], sessionImport: string): string {
-  const schemas = services.map(service => `export const ${service.name}ArgsSchema = z.strictObject({ ${quote(service.parameter)}: z.strictObject({ ${service.request.fields.map(field => `${quote(field)}: u32`).join(', ')} }) });
-export const ${service.name}ReplySchema = z.strictObject({ ${service.response.fields.map(field => `${quote(field)}: u32`).join(', ')} });
+  const schemas = services.map(service => `export const ${service.name}ArgsSchema = z.strictObject({ ${service.args.map(field => `${quote(field.name)}: ${schema(field.value)}`).join(', ')} });
+export const ${service.name}ReplySchema = ${schema(service.reply)};
 export type ${service.name}Args = z.infer<typeof ${service.name}ArgsSchema>;
 export type ${service.name}Reply = z.infer<typeof ${service.name}ReplySchema>;`).join('\n');
   return `import { oc } from '@orpc/contract';
@@ -82,6 +82,7 @@ import { z } from 'zod';
 import { sessionIdSchema } from ${quote(sessionImport)};
 export { sessionIdSchema } from ${quote(sessionImport)};
 const u32 = z.number().int().min(0).max(0xffffffff);
+const nat = z.string().max(15).refine(value => /^(0|[1-9][0-9]*)$/.test(value) && value.length <= 15 && BigInt(value) <= 281474976710655n, 'Nat requires canonical decimal text within 48 bits');
 export const serviceSchema = z.enum([${services.map(service => quote(service.name)).join(', ')}]);
 export const createdSchema = z.strictObject({ sessionId: sessionIdSchema, service: serviceSchema });
 export const okSchema = z.strictObject({ kind: z.literal('ok') });
@@ -102,20 +103,28 @@ import * as codecRuntime from ${quote(imports.codec)};
 import { BytesReader, BytesWriter } from ${quote(imports.bytes)};
 import * as serviceRuntime from ${quote(imports.host)};
 import { ${services.flatMap(service => [`${service.name}ArgsSchema`, `${service.name}ReplySchema`]).join(', ')} } from './contract.ts';
+function boolean(tag: number): boolean {
+  if (tag !== 0 && tag !== 1) throw new Error('Invalid generated boolean tag');
+  return tag === 1;
+}
+function count(value: number, max: number): number {
+  if (value > max) throw new Error('Generated list exceeds bound');
+  return value;
+}
 ${services.map(service => `export const ${service.name}Codec = codecRuntime.validatedCodec({
   contract: ${quote(contractId(service))},
   parse: (input: unknown) => ${service.name}ArgsSchema.parse(input),
   encode(args: ReturnType<typeof ${service.name}ArgsSchema.parse>) {
     const out = new BytesWriter();
-    ${service.request.fields.map(field => `out.u32(args[${quote(service.parameter)}][${quote(field)}]);`).join('\n    ')}
+    ${service.args.map(field => encode(field.value, `args[${quote(field.name)}]`)).join('\n    ')}
     return out.toBuffer();
   },
   decode(payload: Buffer) {
     const reader = new BytesReader(payload);
     if (reader.u8() !== 0) throw new Error('Invalid generated service reply tag');
-    const result = { ${service.response.fields.map(field => `${quote(field)}: reader.u32()`).join(', ')} };
+    const result = ${decode(service.reply)};
     reader.finish();
-    return result;
+    return ${service.name}ReplySchema.parse(result);
   },
 }, ${service.name}ReplySchema);
 export const ${service.name}Service = serviceRuntime.defineService({ name: ${quote(service.name)}, codec: ${service.name}Codec,
@@ -158,7 +167,7 @@ export async function startGateway(options: ServiceHostOptions & { port?: number
     },
 ${services.map(service => `    ${quote(service.name)}: impl[${quote(service.name)}].handler(({ input }) => rpc(() => host.invoke(${service.name}Service, input.sessionId, input.args))),`).join('\n')}
   });
-  const handler = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: 4096 })] });
+  const handler = new RPCHandler(router, { plugins: [new BodyLimitPlugin({ maxBodySize: ${Math.max(...services.map(maxServiceBodyBytes))} })] });
   const server = createServer((request, response) => {
     void handler.handle(request, response, { prefix: '/rpc' }).then(({ matched }) => {
       if (!matched) { response.statusCode = 404; response.end('Not found'); }

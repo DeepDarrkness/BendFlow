@@ -1,8 +1,8 @@
-# BendFlow Phase 3: typed endpoint generator
+# BendFlow Phase 3: native typed endpoint generator
 
 ## Status and goal
 
-Phase 3 is in progress. The build command now creates a working, typed Node endpoint from a stateful Bend service. The first tested example is a retained counter. The full generator and deployment system are not complete.
+Phase 3 is in progress. The generator now creates native workers, typed Node endpoints, contracts, and clients for pure, IO, and stateful Bend services. External types come from one checked recursive Wire Data description. The deployment system and broader architecture acceptance are not complete.
 
 The [desired architecture](architecture.md) owns the architecture and vocabulary. The [Phase 2 reference](bend-node-phase2.md) owns the portable runtime baseline and remaining CUDA acceptance work. Phase 3 does not mark that CUDA work complete.
 
@@ -10,7 +10,115 @@ The goal is a Bend-only service development workflow. You write and test Bend co
 
 No service requires a handwritten Node business handler or a second handwritten definition of its boundary types.
 
-### Current working workflow
+## Generator status on November 16, 2026
+
+The stateful U32-record prototype has been generalized. Pure and IO-only exports accept zero or more named external arguments. Stateful exports accept an explicitly authorized internal state parameter followed by external arguments. Bend owns computation, effects, retained state, and finalization. Node continues to own sessions and admission queues.
+
+### Implemented declarations
+
+Pure and IO services do not require handwritten lifecycle definitions:
+
+```bend
+	import Base
+	def api.add(a: U32, b: U32) -> U32:
+	  (a + b : U32)
+	def api.greet(name: String) -> IO(String):
+	  IO.pure(String, "Hello, " ++ name)
+```
+
+The generated external arguments are `{ a, b }` and `{ name }`. The generator provides a trivial native lifecycle for these services. Sessions remain explicit for all categories.
+
+Stateful services retain the paired lifecycle convention:
+
+```text
+	lifecycle.init.<name>() -> IO(S)
+	api.<name>(state: S, external0: A, ...) -> IO(S & O)
+	lifecycle.finalize.<name>(state: S) -> IO(Unit)
+```
+
+Only matching lifecycle declarations authorize hiding the first parameter. Partial and orphan lifecycles fail generation. Closed generic state and nested pair state are supported. Internal arrays, maps, and affine resource handles remain outside the external contract.
+
+### Supported wire types and limits
+
+| Bend type | External representation | Native encoding |
+| --- | --- | --- |
+| U32 | Integer $0$ through $2^{32}-1$ | Four big-endian bytes |
+| Bool | Boolean | Validated zero or one tag |
+| Nat | Canonical decimal string, at most $2^{48}-1$ | Six big-endian bytes |
+| F32 | `{ bits: number }` | Four bit-pattern bytes, preserving NaN payloads and signed zero |
+| String | Well-formed Unicode text | One-byte UTF-8 length and bytes, preserving BOM |
+| Unit | `null` | Zero bytes |
+| Pair | Two-element JSON tuple | Left value, then right value |
+| Single-constructor Data | Strict object, including empty records | Fields in declaration order |
+| Multi-constructor Data | `{ kind: caseName, fields: object }` | Declaration-order constructor tag and fields |
+| `List<&2, A>` | Bounded JSON array | One-byte count and elements |
+| Closed generic Data | Expanded concrete shape | Encoding derived from its instantiated fields |
+
+Imported Data types and closed aliases, including plain and generic IO aliases, are supported. Finite generic nesting such as `Box<Box<U32>>` is accepted. Direct, mutual, and expanding generic business datatype recursion is rejected. Bounded Base lists are the supported recursive container.
+
+Default bounds remain 96 UTF-8 bytes per string and 32 elements per list. New global build options `--max-text` and `--max-items` set explicit bounds for nested values. Resolved bounds are part of the description and contract fingerprint. Worst-case requests and successful replies, including the reply tag, must fit the 248-byte payload limit. Bounds are never silently reduced.
+
+Native decoders validate the complete request before invoking user code or effects. Generated encoders reject runtime string and list overflow instead of emitting truncated successes. Nat arithmetic beyond the native 48-bit range terminates in BendRT. These failures do not imply rollback or authorize replay.
+
+HTTP body limits now derive from the accepted JSON shapes and escaped envelopes, with a 4096-byte minimum. This permits valid Unit-heavy structures whose JSON is larger than their native encoding. A regression test sends a 7,602-byte escaped request through the actual generated HTTP endpoint.
+
+### Build and example coverage
+
+```sh
+	npm run build:services
+	npm run build:services -- --entry examples/services/portable.bend --out build/portable-services --max-text 16 --max-items 4
+	npm run build:services -- --entry examples/services/effects.bend --out build/effect-services
+```
+
+`scripts/test/build-services.ts` builds the counter, portable, and effect entries before static and integration checks. The portable entry combines nested boundary types and requires the explicit smaller bounds shown above.
+
+| Example | Implemented and exercised behavior |
+| --- | --- |
+| `examples/services/counter.bend` | Counter and accumulator, retained state, session isolation, queue behavior, and finalization |
+| `examples/services/helpers.bend` | Imported helper computation remains internal |
+| `examples/services/portable.bend` | Pure and IO exports, zero and multiple arguments, scalars, pairs, nested records, unions, lists, declared failure values, CPU parallel work, proof-backed helpers, array and map state, and oversized-reply rejection |
+| `examples/services/wire-types.bend` | Imported records, empty records, unions, and nested closed generic types |
+| `examples/services/effects.bend` | Observed affine file finalization, bounded process execution, fork/join channels, and finite loopback TCP effects |
+| `examples/echo.ts` | Existing native echo demonstration |
+| `examples/session.ts` and `examples/session-client.ts` | Existing external-client retained-session demonstration |
+
+New checks live in `tests/compiler/general-services.test.ts`, `tests/integration/general-services.test.ts`, `tests/integration/generator-regressions.test.ts`, and `tests/types/general-services.types.ts`. They include independent golden bytes, every truncation of a nested packet, trailing bytes, malformed tags and UTF-8, scalar and collection limits, invalid input without effects, resource cleanup, exact client types, nested lifecycle state, and IO aliases. A real native compilation failure after staging leaves the preceding package invokable.
+
+This coverage includes BendFlow's portable examples and representative supported language capabilities. It does not establish execution of every upstream Bend demo. Native window, native audio, and GPU device execution remain excluded. Existing GPU admission and evidence-policy tests still run.
+
+### Verification completed so far
+
+The following commands ran successfully in the main BendFlow checkout after the generator changes were transferred:
+
+| Command | Observed result |
+| --- | --- |
+| `npm test` | 305 tests passed, zero failures, zero skips. Includes generated-package builds, TypeScript checking, and native regression tests |
+| `npm run check:compiler` | Three positive compiler fixtures and both production proof-verdict entries passed |
+| `npm run example` | All three echo payloads matched |
+| `npm run example:session` | External client observed totals 7, 14, and 21, then reset and add 5 |
+
+The refreshed `build/phase2-results.json` reports `portable-complete`. The portable completion command also passed in the isolated implementation checkout before transfer. A final evidence audit has not been performed. These results record executed checks, not full Phase 3 publication acceptance.
+
+### Handoff and remaining work
+
+The next agent owns the final evidence audit and broader architecture requirements:
+
+- Standalone package relocation and runtime dependency packaging.
+- Conventional JSON HTTP adapters, OpenAPI, and a non-Node caller.
+- HTTP disconnect wiring for queued invocation cancellation.
+- Integration with the Phase 2 service registry.
+- Complete source-span diagnostics and the full Phase 3 requirement inventory.
+- Transfer protocols for values larger than one frame.
+- User foreign-effect dependency packaging and imports outside the entry root.
+- Broader publication acceptance and device-specific evidence.
+
+The generator still rejects external functions, proofs, handles, dependent values, erased fields, affine lists, and unresolved templates. User-defined foreign effects and outside-root imports remain unsupported. Generated TypeScript still imports the repository runtime and installed dependencies. No standalone deployment or full architecture-completion claim is made.
+
+## Historical stateful prototype
+
+The following workflow and acceptance evidence describe the earlier U32-record vertical slice. The generator status above supersedes its boundary restrictions. The milestone plan below remains the broader Phase 3 roadmap.
+
+### Prototype workflow
 
 You write the Bend service and its initialization and finalization functions in Bend. Run `npm run build:services` to generate the endpoint, its contracts, the client, and the native worker.
 
@@ -486,16 +594,16 @@ GPU generation or admission is not accepted through CPU fallback. If Phase 3 add
 
 | Milestone | Status | Evidence |
 | --- | --- | --- |
-| 0. Declarations and policies | Partial | Lifecycle triple and U32-record slice policies implemented. Broader policy choices remain. |
-| 1. Compiler adapter and checked description | Partial | Compiler-backed extraction and four compiler-valid rejection fixtures pass. General Data and complete diagnostics remain. |
-| 2. Generated pure native service | Partial | Generated native stateful calls and golden codecs pass. The unpaired pure-service form remains. |
-| 3. Data codecs and IO | Partial | Flat U32 Data records and IO transitions execute natively. Other wire types and application failures remain. |
-| 4. Stateful lifecycle | Partial | Counter retention, isolation, observed finalization, and startup overlap pass. Affine-resource acceptance remains. |
+| 0. Declarations and policies | Partial | Pure, IO, and paired stateful declarations and bounded wire policy implemented. Broader controller, deployment, and API policy acceptance remains. |
+| 1. Compiler adapter and checked description | Partial | Recursive checked wire description, closed generics, imports, aliases, and nested rejection fixtures pass. Complete diagnostics and final inventory audit remain. |
+| 2. Generated pure native service | Implemented; final audit pending | Zero and multiple arguments, native pure computation, independent goldens, malformed-input rejection, and cleanup execute in tests. |
+| 3. Data codecs and IO | Implemented bounded support; final audit pending | Scalars, pairs, records, unions, lists, generic Data, and native IO pass. Unsupported cases and transfer limits are documented above. |
+| 4. Stateful lifecycle | Partial | Retention, isolation, generic and pair state, observed affine File cleanup, and startup overlap pass. Full lifecycle acceptance audit remains. |
 | 5. Generated endpoints and registry | Partial | Generated service schemas, codecs, endpoints, and exact clients pass. Phase 2 registry migration remains. |
 | 6. Session invocation queue | Partial | Native-backed queue order, capacity, expiry, abort, failure, and close checks pass. HTTP disconnect wiring remains. |
 | 7. HTTP contracts and clients | Partial | Typed clients and raw oRPC HTTP pass. Portable JSON, OpenAPI, and a non-Node caller remain. |
-| 8. Build and deployment package | Partial | Staged builds, generated typechecking, deterministic source, and rejected-build preservation pass. Standalone relocation remains. |
-| 9. Regression and publication | Partial | All 289 tests, portable completion, and compiler checks pass. A Phase 3 inventory and full publication acceptance remain. |
+| 8. Build and deployment package | Partial | Staged builds, explicit bounds, generated typechecking, deterministic source, and preservation after native compilation failure pass. Standalone relocation remains. |
+| 9. Regression and publication | Partial | Main-checkout run passes all 305 tests and compiler gates. Portable report is refreshed. Final evidence audit, Phase 3 inventory, and full publication acceptance remain. |
 
 ## Sources
 

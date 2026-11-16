@@ -20,7 +20,7 @@
     "conformance:cuda:fallback": "node scripts/conformance/gpu.ts fallback",
     "conformance:cuda:package": "node scripts/conformance/gpu.ts package",
     "conformance:hardware": "node scripts/conformance/hardware.ts",
-    "typecheck": "npm run build:services && tsc --noEmit",
+    "typecheck": "node scripts/test/build-services.ts && tsc --noEmit",
     "test:unit": "node scripts/test/run.ts unit",
     "test:integration": "node scripts/test/run.ts integration",
     "test:compiler": "node scripts/test/run.ts compiler",
