@@ -47,6 +47,9 @@ function execute(args: string[]): void {
 
 export function runTests(selection: TestSelection): void {
   assert.equal(process.versions.node.split('.')[0], '24', 'Node 24 LTS is required');
+  if (selection === 'types' || selection === 'integration' || selection === 'full') {
+    execute([projectPath('scripts/build/services.ts')]);
+  }
   if (selection === 'types' || selection === 'full') {
     execute([projectPath('node_modules/typescript/bin/tsc'), '--noEmit', '--project', projectPath('tsconfig.json')]);
   }
