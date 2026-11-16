@@ -54,6 +54,7 @@ export function buildServices(options: { entry: string; out: string } & WireBoun
     run(process.execPath, [projectPath('node_modules/typescript/bin/tsc'), '--project', resolve(stage, 'tsconfig.json')]);
     writeFileSync(resolve(stage, 'description.json'), JSON.stringify({ version: 2, services }, null, 2) + '\n');
     const hash = (file: string) => createHash('sha256').update(readFileSync(file)).digest('hex');
+    // Full deployed-runtime provenance is Phase 4; this manifest fingerprints the current native build inputs.
     writeFileSync(resolve(stage, 'build.json'), JSON.stringify({ format, compiler: revision, node: process.version,
       clang: run(clang, ['--version']).split('\n')[0],
       scope: 'pure/io/stateful recursive bounded Wire Data; repository runtime dependencies; native CPU',
@@ -62,6 +63,7 @@ export function buildServices(options: { entry: string; out: string } & WireBoun
       services: services.map(service => ({ name: service.name, contract: contractId(service),
         executable: `native/worker-${service.name}`, hash: hash(resolve(stage, 'native', `worker-${service.name}`)) })),
     }, null, 2) + '\n');
+    // Replacement is not crash-atomic: interruption between renames can leave the output absent and the package at backup.
     if (existsSync(out)) renameSync(out, backup);
     try { renameSync(stage, out); }
     catch (error) {

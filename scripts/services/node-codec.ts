@@ -8,6 +8,7 @@ export function schema(type: WireType): string {
     case 'nat': return 'nat';
     case 'f32': return 'z.strictObject({bits: u32})';
     case 'unit': return 'z.null()';
+    case 'char': return 'char';
     case 'string': return `z.string().refine(value => value.isWellFormed() && Buffer.byteLength(value, 'utf8') <= ${type.maxBytes}, 'Invalid or oversized Unicode text')`;
     case 'pair': return `z.tuple([${schema(type.left)}, ${schema(type.right)}])`;
     case 'list': return `z.array(${schema(type.element)}).max(${type.maxItems})`;
@@ -23,6 +24,7 @@ export function encode(type: WireType, value: string, depth = 0): string {
     case 'bool': return `out.u8(${value} ? 1 : 0);`;
     case 'nat': return `out.nat(BigInt(${value}));`;
     case 'unit': return '';
+    case 'char': return `out.u32(characterCode(${value}));`;
     case 'string': return `out.text(${value}, ${type.maxBytes});`;
     case 'pair': return `${encode(type.left, `${value}[0]`, depth)}\n${encode(type.right, `${value}[1]`, depth)}`;
     case 'record': return type.fields.map(field => encode(field.value, `${value}[${q(field.name)}]`, depth)).join('\n');
@@ -38,6 +40,7 @@ export function decode(type: WireType): string {
     case 'bool': return 'boolean(reader.u8())';
     case 'nat': return 'reader.nat().toString(10)';
     case 'unit': return 'null';
+    case 'char': return 'character(reader.u32())';
     case 'string': return `reader.text(${type.maxBytes})`;
     case 'pair': return `[${decode(type.left)}, ${decode(type.right)}]`;
     case 'record': return `{${type.fields.map(field => `${q(field.name)}: ${decode(field.value)}`).join(', ')}}`;

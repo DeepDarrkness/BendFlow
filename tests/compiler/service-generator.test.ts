@@ -24,7 +24,7 @@ test('service generator derives external Data fields and authorizes private stat
 
 for (const [fixture, diagnostic] of [
   ['not-data', /api\.bad\.args\.request: Request must be declared is Data, not Type/],
-  ['unsupported-data', /api\.bad\.args\.request\.amount: Char is not supported Wire Data/],
+  ['unsupported-data', /api\.bad\.args\.request\.amount: Cmp is not supported Wire Data/],
   ['dependent', /api\.bad\.args\.request: .*requires a concrete named type; dependent and function types/],
   ['missing-lifecycle', /lifecycle\.finalize\.bad: requires a filled entry-module definition/],
 ] satisfies [string, RegExp][]) {

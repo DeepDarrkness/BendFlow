@@ -83,6 +83,7 @@ import { sessionIdSchema } from ${quote(sessionImport)};
 export { sessionIdSchema } from ${quote(sessionImport)};
 const u32 = z.number().int().min(0).max(0xffffffff);
 const nat = z.string().max(15).refine(value => /^(0|[1-9][0-9]*)$/.test(value) && value.length <= 15 && BigInt(value) <= 281474976710655n, 'Nat requires canonical decimal text within 48 bits');
+const char = z.string().refine(value => value.isWellFormed() && [...value].length === 1, 'Char requires one Unicode scalar');
 export const serviceSchema = z.enum([${services.map(service => quote(service.name)).join(', ')}]);
 export const createdSchema = z.strictObject({ sessionId: sessionIdSchema, service: serviceSchema });
 export const okSchema = z.strictObject({ kind: z.literal('ok') });
@@ -110,6 +111,15 @@ function boolean(tag: number): boolean {
 function count(value: number, max: number): number {
   if (value > max) throw new Error('Generated list exceeds bound');
   return value;
+}
+function character(code: number): string {
+  if (code > 0x10ffff || (code >= 0xd800 && code <= 0xdfff)) throw new Error('Invalid generated Unicode scalar');
+  return String.fromCodePoint(code);
+}
+function characterCode(value: string): number {
+  const code = value.codePointAt(0);
+  if (code === undefined) throw new Error('Missing generated Unicode scalar');
+  return code;
 }
 ${services.map(service => `export const ${service.name}Codec = codecRuntime.validatedCodec({
   contract: ${quote(contractId(service))},

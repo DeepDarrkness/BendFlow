@@ -7,6 +7,7 @@ export function bendType(type: WireType): string {
     case 'nat': return 'Nat';
     case 'f32': return 'F32';
     case 'unit': return 'Unit';
+    case 'char': return 'Char';
     case 'string': return 'String';
     case 'pair': return `(${bendType(type.left)} & ${bendType(type.right)})`;
     case 'record': case 'union': case 'list': return type.bendType;
@@ -43,6 +44,12 @@ export function bendCodecs() {
     let decode: string, encode: string;
     switch (type.kind) {
       case 'unit': decode = 'Some{(Unit{}, bytes)}'; encode = 'Some{[]}'; break;
+      case 'char': {
+        definitions.push(`def ${id}.got(got: Maybe<&2, Bytes.SplitU32>) -> ${split}:\n  match got:\n    case None{}:\n      None{}\n    case Some{Bytes.SplitU32{v, rest}}:\n      do Maybe<&1, Char & ${bytes}>:\n        value : Char <- Wire.char(v)\n        return (value, rest)\n`);
+        decode = `${id}.got(Bytes.take_u32(bytes))`;
+        encode = `do Maybe<&1, ${bytes}>:\n    code : U32 <- Wire.char_code(value)\n    return Bytes.encode_u32(code)`;
+        break;
+      }
       case 'u32': case 'nat': case 'f32': case 'bool': case 'string': {
         const take = type.kind === 'nat' ? 'nat' : type.kind === 'string' ? 'text' : type.kind === 'bool' ? 'u8' : 'u32';
         const Split = type.kind === 'nat' ? 'SplitNat' : type.kind === 'string' ? 'SplitText' : 'SplitU32';

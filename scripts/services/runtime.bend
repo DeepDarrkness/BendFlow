@@ -19,6 +19,21 @@ def guard(ok: Bool) -> Maybe<&1, Unit>:
     case False{}:
       None{}
 
+def scalar(+code: U32) -> Bool:
+  Bool.and(U32.is_le(code, 1114111), Bool.or(U32.is_lt(code, 55296), U32.is_gt(code, 57343)))
+
+def char(+code: U32) -> Maybe<&1, Char>:
+  do Maybe<&1, Char>:
+    valid : Unit <- guard(scalar(code))
+    return Chr{code}
+
+def char_code(value: Char) -> Maybe<&1, U32>:
+  match value:
+    case Chr{+code}:
+      do Maybe<&1, U32>:
+        valid : Unit <- guard(scalar(code))
+        return code
+
 def take_text.decoded(got: Maybe<&2, String>, rest: List<&2, U32>) -> Maybe<&2, Bytes.SplitText>:
   match got:
     case None{}:
@@ -51,7 +66,7 @@ def text.go(fuel: Nat, value: String, +budget: Nat, acc: List<&2, U32>, +count: 
           Some{count <> acc}
         case SCon{Chr{+code}, tail}:
           do Maybe<&1, List<&2, U32>>:
-            valid : Unit <- guard(Bool.and(U32.is_le(code, 1114111), Bool.or(U32.is_lt(code, 55296), U32.is_gt(code, 57343))))
+            valid : Unit <- guard(scalar(code))
             +bytes : List<&2, U32> = Utf8.utf8_encode_char(Chr{code})
             +size : Nat = List.length(&2, U32, bytes)
             fits : Unit <- guard(Nat.is_le(size, budget))

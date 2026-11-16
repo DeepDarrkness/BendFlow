@@ -6,7 +6,13 @@ import { validatedCodec } from './protocol/codec.ts';
 import { WorkerError, type WorkerOptions } from './worker.ts';
 
 type Parser<T> = Readonly<{ parse: (input: unknown) => T }>;
-type StartOptions = Omit<WorkerOptions, 'contract' | 'executable' | 'profile' | 'threads'>;
+type StartOptions = Omit<WorkerOptions, 'contract' | 'executable' | 'profile'>;
+
+function serviceExecution(threads = 2): { profile: Extract<WorkerOptions['profile'], 'native-cpu' | 'multithreaded-cpu'>; threads: number } {
+  // Two threads per session limit oversubscription while permitting parallel work.
+  if (!Number.isInteger(threads) || threads < 1 || threads > 64) throw new RangeError('Invalid service worker threads');
+  return { profile: threads === 1 ? 'native-cpu' : 'multithreaded-cpu', threads };
+}
 type OwnedApp = Readonly<{
   pid: number;
   command: (input: unknown) => Promise<unknown>;
@@ -50,7 +56,7 @@ export function defineService<Args, Reply>(options: {
     reply,
     start: async (worker: StartOptions): Promise<OwnedApp> => {
       const app = await NativeApp.start(checkedCodec, {
-        ...worker, executable, profile: 'native-cpu', threads: 1,
+        ...worker, executable, ...serviceExecution(worker.threads),
       });
       return {
         pid: app.pid,
@@ -68,6 +74,7 @@ type Job = {
   completion: ReturnType<typeof Promise.withResolvers<unknown>>;
   disposeWaitingHooks: () => void;
 };
+// Serialized invocations preserve state ownership; they do not cap CPU evaluation threads.
 type Phase =
   | { kind: 'idle' }
   | { kind: 'active'; job: Job; settled: Promise<void> }
@@ -115,6 +122,7 @@ export class ServiceHost {
     this.#waitMs = deadline(options.waitMs ?? 2000, 'waiting deadline');
     this.#drainMs = deadline(options.drainMs ?? 2000, 'drain deadline');
     this.#worker = { ...options.worker, env: { ...options.worker?.env } };
+    this.#worker.threads = serviceExecution(this.#worker.threads).threads;
     for (const value of [this.#worker.startupMs, this.#worker.callMs, this.#worker.terminationGraceMs]) {
       if (value !== undefined) deadline(value, 'worker deadline');
     }

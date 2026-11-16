@@ -6,3 +6,5 @@ for (const example of ['counter', 'portable', 'effects']) {
     out: projectPath(example === 'counter' ? 'build/services' : example === 'portable' ? 'build/portable-services' : 'build/effect-services'),
     ...(example === 'portable' ? { maxText: 16, maxItems: 4 } : {}) });
 }
+buildServices({ entry: projectPath('tests/fixtures/services/data-boundary.bend'),
+  out: projectPath('build/data-services'), maxItems: 4 });

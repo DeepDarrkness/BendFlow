@@ -96,7 +96,7 @@ test('typed and raw HTTP matrix invokes every portable service and retains state
   const division = await client.sessions.create({service:'divide'});
   assert.deepEqual(await client.divide({sessionId:division.sessionId,args:{a:12,b:0}}),{kind:'Bad',fields:{code:1}});
   assert.deepEqual(await client.divide({sessionId:division.sessionId,args:{a:12,b:3}}),{kind:'Good',fields:{value:4}});
-  const fork = await NativeApp.start(forkCodec,{executable:projectPath('build/portable-services/native/worker-fork'),threads:2});
+  const fork = await NativeApp.start(forkCodec,{executable:projectPath('build/portable-services/native/worker-fork'),profile:'multithreaded-cpu',threads:2});
   t.after(() => fork.close());
   assert.equal(await fork.command({}),4096);
 });

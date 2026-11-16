@@ -33,7 +33,12 @@ test('compiler-valid unsupported boundaries and lifecycles fail with actionable 
     ['function','def api.bad(value: U32 -> U32) -> U32:\n  value(0)',/api.bad.args.value.*function types/],
     ['proof','type Proof is Data:\n  Proof{-e: {0n == 0n : Nat}}\ndef api.bad(value: Proof) -> U32:\n  0',/api.bad.args.value.*erased fields\/proofs/],
     ['handle','def api.bad(value: File) -> U32:\n  0',/api.bad.args.value.*concrete named type/],
-    ['nested','type Inside is Data:\n  Inside{bad: Char}\ntype Outer is Data:\n  Outer{nested: Inside}\ndef api.bad(value: Outer) -> U32:\n  0',/api.bad.args.value.nested.bad.*not supported/],
+    ['nested','type Inside is Data:\n  Inside{bad: Cmp}\ntype Outer is Data:\n  Outer{nested: Inside}\ndef api.bad(value: Outer) -> U32:\n  0',/api.bad.args.value.nested.bad.*not supported/],
+    ['erased','def api.bad(-value: U32) -> U32:\n  0',/parameters must not be erased/],
+    ['template','def api.bad(~value: U32) -> U32:\n  value',/no templates/],
+    ['many-state','def lifecycle.init.bad() -> IO(U32):\n  IO.pure(U32, 0)\ndef lifecycle.finalize.bad(state: U32) -> IO(Unit):\n  IO.pure(Unit, Unit{})\ndef api.bad(+state: U32, +value: U32) -> IO(U32 & U32):\n  IO.pure(U32 & U32, (state, value))',/transition state parameter must be affine/],
+    ['many-finalizer','def lifecycle.init.bad() -> IO(U32):\n  IO.pure(U32, 0)\ndef lifecycle.finalize.bad(+state: U32) -> IO(Unit):\n  IO.pure(Unit, Unit{})\ndef api.bad(state: U32) -> IO(U32 & U32):\n  IO.pure(U32 & U32, (state, 0))',/finalizer state parameter must be affine/],
+    ['many-unsupported','def api.bad(+value: Cmp) -> U32:\n  0',/api.bad.args.value.*not supported/],
     ['orphan','def lifecycle.init.bad() -> IO(Unit):\n  IO.pure(Unit, Unit{})\ndef api.ok() -> U32:\n  0',/orphan lifecycle/],
     ['incomplete','def lifecycle.init.bad() -> IO(Unit):\n  IO.pure(Unit, Unit{})\ndef api.bad() -> U32:\n  0',/lifecycle.finalize.bad.*filled entry-module/],
     ['reply-function','def api.bad() -> U32 -> U32:\n  x => x',/api.bad.result.*function types/],
@@ -63,9 +68,35 @@ test('HTTP body limits account for escaped envelopes and zero-width native recor
   assert.equal(maxServiceBodyBytes(service),7602);
   assert.equal(maxJsonBytes({kind:'string',maxBytes:96}),578);
   assert.equal(maxJsonBytes({kind:'nat'}),92);
+  assert.equal(maxJsonBytes({kind:'char'}),14);
+  assert.deepEqual(analyzeWire({kind:'char'}),{canonical:['char'],maxBytes:4});
   assert.equal(maxJsonBytes({kind:'f32'}),39);
   assert.equal(maxJsonBytes({kind:'pair',left:{kind:'u32'},right:{kind:'bool'}}),18);
   assert.equal(maxJsonBytes({kind:'union',bendType:'Choice',cases:[{name:'EscapedCase',constructor:'Choice.EscapedCase',fields:[{name:'x',value:{kind:'unit'}}]}]}),152);
+});
+
+test('Object prototype names reach nominal Data expansion instead of scalar lookup', t => {
+  const root = mkdtempSync(projectPath('build/scalar-name-'));
+  t.after(() => rmSync(root,{recursive:true,force:true}));
+  for (const name of ['toString','valueOf','hasOwnProperty','isPrototypeOf','propertyIsEnumerable','toLocaleString']) {
+    const entry = resolve(root,'names.bend');
+    writeFileSync(entry,`import Base\ntype ${name} is Data:\n  Named{value: U32}\ndef api.echo(+value: ${name}) -> ${name}:\n  value\n`);
+    const service = inspectServices(entry).services[0];
+    assert.ok(service?.reply.kind === 'record',name);
+    assert.deepEqual(service.reply.fields,[{name:'value',value:{kind:'u32'}}]);
+    writeFileSync(entry,`import Base\ntype ${name} is Type:\n  Named{value: U32}\ndef api.echo(value: ${name}) -> U32:\n  0\n`);
+    assert.throws(() => inspectServices(entry),/must be declared is Data, not Type/,name);
+  }
+});
+
+test('reusable external scalars records and Data lists share the ordinary boundary', () => {
+  const {services} = inspectServices(projectPath('tests/fixtures/services/data-boundary.bend'),{maxItems:4});
+  assert.equal(services.find(service => service.name === 'glyph')?.args[0]?.value.kind,'char');
+  assert.equal(services.find(service => service.name === 'shape')?.args[0]?.value.kind,'record');
+  assert.equal(services.find(service => service.name === 'repeat')?.args[0]?.value.kind,'list');
+  const glyph = services.find(service => service.name === 'glyph');
+  assert.ok(glyph);
+  assert.notEqual(contractId(glyph),contractId({...glyph,args:[{name:'value',value:{kind:'u32'}}],reply:{kind:'u32'}}));
 });
 
 test('canonical contracts ignore native record spelling and category but retain external order and resolved bounds', () => {

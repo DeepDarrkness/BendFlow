@@ -8,7 +8,7 @@ import { checkServiceBounds } from './wire.ts';
 const identifier = z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/).refine(value => !['__proto__', 'prototype', 'constructor'].includes(value));
 const nativeName = z.string().regex(/^[A-Za-z_][A-Za-z0-9_.]*$/);
 export const wireSchema = z.discriminatedUnion('kind', [
-  z.strictObject({ kind: z.enum(['u32', 'bool', 'nat', 'f32', 'unit']) }),
+  z.strictObject({ kind: z.enum(['u32', 'bool', 'nat', 'f32', 'unit', 'char']) }),
   z.strictObject({ kind: z.literal('string'), maxBytes: z.number().int().min(0).max(247) }),
   z.strictObject({ kind: z.literal('pair'), get left() { return wireSchema; }, get right() { return wireSchema; } }),
   z.strictObject({ kind: z.literal('list'), bendType: z.string(), maxItems: z.number().int().min(0).max(255), get element() { return wireSchema; } }),

@@ -7,6 +7,7 @@ const bounds = JSON.parse(policy);
 const maxText = bounds.maxText ?? 96, maxItems = bounds.maxItems ?? 32;
 const Bend = await import(pathToFileURL(compiler).href);
 const book = Bend.book_nil(), seen = new Map(), modules = new Map();
+const scalarKinds = new Map([['U32', 'u32'], ['Bool', 'bool'], ['Nat', 'nat'], ['F32', 'f32'], ['Unit', 'unit'], ['Char', 'char']]);
 let nodes = 0;
 function fail(path, reason) { throw new Error(`${path}: ${reason}`); }
 function name(value, path) {
@@ -52,8 +53,8 @@ function signature(key, arity) {
   let result = def.T;
   for (let index = 0; index < def.n; index++) {
     const t = normal(result);
-    if (t.$ !== 'All' || t.q.$ !== 'Lone') fail(key, 'parameters must be affine and not erased');
-    parameters.push({ name: name(t.k, key), type: t.A });
+    if (t.$ !== 'All' || !['Lone', 'Many'].includes(t.q.$)) fail(key, 'parameters must not be erased');
+    parameters.push({ name: name(t.k, key), type: t.A, quantity: t.q.$ });
     result = t.B(Bend.Var(t.k, index));
   }
   return { parameters, result };
@@ -119,7 +120,7 @@ function expand(term, path, active = [], depth = 0) {
   if (parts) return { kind: 'pair', left: expand(parts[0], `${path}[0]`, active, depth + 1), right: expand(parts[1], `${path}[1]`, active, depth + 1) };
   const t = normal(term), v = Bend.term_lower(t);
   const key = v.$ === 'Ref' || v.$ === 'ADT' ? v.k : null;
-  const scalar = { U32: 'u32', Bool: 'bool', Nat: 'nat', F32: 'f32', Unit: 'unit' }[key];
+  const scalar = scalarKinds.get(key);
   if (scalar) return { kind: scalar };
   if (key === 'String') return { kind: 'string', maxBytes: maxText };
   if (key === 'List' && t.$ === 'ADT' && t.x.length === 2 && !t.r.length) {
@@ -169,6 +170,8 @@ try {
       const initialized = signature(init, 0), closed = signature(finalize, 1);
       const state = io(initialized.result, init), paired = pairParts(io(reply, key));
       if (!external.length || !paired) fail(key, 'requires IO(State & Response) and a first state parameter');
+      if (external[0].quantity !== 'Lone') fail(key, 'transition state parameter must be affine');
+      if (closed.parameters[0].quantity !== 'Lone') fail(finalize, 'finalizer state parameter must be affine');
       const stateCode = code(state, init);
       if ([external[0].type, paired[0], closed.parameters[0].type].some(x => code(x, key) !== stateCode)) fail(key, 'initializer, transition, and finalizer must use the same state type');
       if (code(io(closed.result, finalize), finalize) !== 'Unit') fail(finalize, 'requires IO(Unit)');

@@ -19,6 +19,7 @@ export function maxJsonBytes(type: WireType): number {
     case 'f32': return jsonObjectBytes([{name:'bits',bytes:10}]);
     case 'bool': return 5;
     case 'unit': return 4;
+    case 'char': return 14;
     case 'string': return jsonStringBytes(type.maxBytes);
     case 'pair': return 3 + maxJsonBytes(type.left) + maxJsonBytes(type.right);
     case 'list': return 2 + Math.max(0,type.maxItems - 1) + type.maxItems * maxJsonBytes(type.element);
@@ -43,7 +44,7 @@ export function maxServiceBodyBytes(service: ServiceDescription): number {
 
 export function analyzeWire(type: WireType): { canonical: unknown; maxBytes: number } {
   switch (type.kind) {
-    case 'u32': case 'f32': return { canonical: [type.kind], maxBytes: 4 };
+    case 'u32': case 'f32': case 'char': return { canonical: [type.kind], maxBytes: 4 };
     case 'bool': return { canonical: ['bool'], maxBytes: 1 };
     case 'nat': return { canonical: ['nat48'], maxBytes: 6 };
     case 'unit': return { canonical: ['unit'], maxBytes: 0 };
@@ -61,6 +62,7 @@ export function analyzeWire(type: WireType): { canonical: unknown; maxBytes: num
       return { canonical: ['record', fields.map(field => [field.name, field.canonical])], maxBytes: fields.reduce((sum, field) => sum + field.maxBytes, 0) };
     }
     case 'union': {
+      // Case names and declaration-order tags are public; renaming or reordering changes the contract.
       const cases = type.cases.map(value => ({ name: value.name, ...analyzeWire({ kind: 'record', bendType: type.bendType, constructor: value.constructor, fields: value.fields }) }));
       return { canonical: ['union', cases.map(value => [value.name, value.canonical])], maxBytes: 1 + Math.max(...cases.map(value => value.maxBytes)) };
     }

@@ -2,7 +2,7 @@
 
 ## Status and goal
 
-Phase 3 is in progress. The generator now creates native workers, typed Node endpoints, contracts, and clients for pure, IO, and stateful Bend services. External types come from one checked recursive Wire Data description. The deployment system and broader architecture acceptance are not complete.
+Phase 3 is in progress. The generator now creates native workers, typed Node endpoints, contracts, and clients for pure, IO, and stateful Bend services. External types come from one checked recursive Wire Data description. Phase 3 targets the transparent Node-to-Bend service boundary. Standalone packaging and database integration belong to Phase 4. Broader boundary and lifecycle acceptance remain incomplete.
 
 The [desired architecture](architecture.md) owns the architecture and vocabulary. The [Phase 2 reference](bend-node-phase2.md) owns the portable runtime baseline and remaining CUDA acceptance work. Phase 3 does not mark that CUDA work complete.
 
@@ -16,7 +16,7 @@ The stateful U32-record prototype has been generalized. Pure and IO-only exports
 
 ### Implemented declarations
 
-Pure and IO services do not require handwritten lifecycle definitions:
+Pure and IO services do not require handwritten lifecycle definitions. External supported Data parameters may be affine or reusable with `+`. Stateful transition and finalizer state parameters remain affine:
 
 ```bend
 	import Base
@@ -48,13 +48,14 @@ Only matching lifecycle declarations authorize hiding the first parameter. Parti
 | F32 | `{ bits: number }` | Four bit-pattern bytes, preserving NaN payloads and signed zero |
 | String | Well-formed Unicode text | One-byte UTF-8 length and bytes, preserving BOM |
 | Unit | `null` | Zero bytes |
+| Char | A string containing exactly one Unicode scalar | Four big-endian code-point bytes, excluding surrogates and values above U+10FFFF |
 | Pair | Two-element JSON tuple | Left value, then right value |
 | Single-constructor Data | Strict object, including empty records | Fields in declaration order |
 | Multi-constructor Data | `{ kind: caseName, fields: object }` | Declaration-order constructor tag and fields |
 | `List<&2, A>` | Bounded JSON array | One-byte count and elements |
 | Closed generic Data | Expanded concrete shape | Encoding derived from its instantiated fields |
 
-Imported Data types and closed aliases, including plain and generic IO aliases, are supported. Finite generic nesting such as `Box<Box<U32>>` is accepted. Direct, mutual, and expanding generic business datatype recursion is rejected. Bounded Base lists are the supported recursive container.
+Imported Data types and closed aliases, including plain and generic IO aliases, are supported. Finite generic nesting such as `Box<Box<U32>>` is accepted. Direct, mutual, and expanding generic business datatype recursion is rejected. Bounded Base lists are the supported recursive container. Extraction also limits nesting to 32 levels and total external expansion to 4096 nodes across the entry's services.
 
 Default bounds remain 96 UTF-8 bytes per string and 32 elements per list. New global build options `--max-text` and `--max-items` set explicit bounds for nested values. Resolved bounds are part of the description and contract fingerprint. Worst-case requests and successful replies, including the reply tag, must fit the 248-byte payload limit. Bounds are never silently reduced.
 
@@ -88,31 +89,83 @@ This coverage includes BendFlow's portable examples and representative supported
 
 ### Verification completed so far
 
-The following commands ran successfully in the main BendFlow checkout after the generator changes were transferred:
+The following commands ran successfully in the main BendFlow checkout after the Data-boundary and CPU execution changes:
 
 | Command | Observed result |
 | --- | --- |
-| `npm test` | 305 tests passed, zero failures, zero skips. Includes generated-package builds, TypeScript checking, and native regression tests |
+| `npm test` | 313 tests passed, zero failures, zero skips. Includes generated-package builds, TypeScript checking, Char regressions, and actual CPU lane checks |
 | `npm run check:compiler` | Three positive compiler fixtures and both production proof-verdict entries passed |
 | `npm run example` | All three echo payloads matched |
 | `npm run example:session` | External client observed totals 7, 14, and 21, then reset and add 5 |
 
-The refreshed `build/phase2-results.json` reports `portable-complete`. The portable completion command also passed in the isolated implementation checkout before transfer. A final evidence audit has not been performed. These results record executed checks, not full Phase 3 publication acceptance.
+The previous transferred-generator run passed 305 tests. The current full run refreshes `build/phase2-results.json`, and the portable completion gate reports `portable-complete` with no blockers. Complete Phase 3 acceptance still requires the remaining boundary and lifecycle inventory. These results record executed checks, not standalone deployment acceptance.
 
 ### Handoff and remaining work
 
 The next agent owns the final evidence audit and broader architecture requirements:
 
-- Standalone package relocation and runtime dependency packaging.
+- Standalone package relocation and runtime dependency packaging are deferred to Phase 4.
 - Conventional JSON HTTP adapters, OpenAPI, and a non-Node caller.
 - HTTP disconnect wiring for queued invocation cancellation.
 - Integration with the Phase 2 service registry.
 - Complete source-span diagnostics and the full Phase 3 requirement inventory.
 - Transfer protocols for values larger than one frame.
-- User foreign-effect dependency packaging and imports outside the entry root.
+- User foreign-effect dependency packaging is deferred to Phase 4; outside-root imports remain unsupported.
 - Broader publication acceptance and device-specific evidence.
 
 The generator still rejects external functions, proofs, handles, dependent values, erased fields, affine lists, and unresolved templates. User-defined foreign effects and outside-root imports remain unsupported. Generated TypeScript still imports the repository runtime and installed dependencies. No standalone deployment or full architecture-completion claim is made.
+
+## Boundary and execution decisions on November 16, 2026
+
+### Transparent Data boundary
+
+The base assumption is that external services exchange Data values with Node. They do not see Bend's dependent types, proofs, runtime handles, IO actions, or retained state. A callable endpoint can perform effects internally; a transparent call interface does not promise mathematical purity or transactional rollback.
+
+The scalar whitelist is U32, Bool, Nat, F32, String, Unit, and Char. Supported tuples, Data records, Data variants, and bounded arrays recursively use these values. JSON arrays map to `List<&2, A>`, including nested lists. Bend's affine `Array<A>` stays internal; returning its contents requires a Data snapshot. Ordinary nondependent Bend pairs are accepted as structural products even though Base gives them kind Type. This is a representation rule, not permission for arbitrary Type values to cross the boundary.
+
+Base Maybe, Result, and Cmp are not required external types. They may remain internal. User-defined Data unions remain supported for domain outcomes. An Effect-style success/error/requirements abstraction is a proposal, not an accepted Phase 3 requirement.
+
+Char uses a well-formed string with exactly one Unicode scalar. `"A"`, an astral character, and U+0000 are valid. Empty strings, lone surrogates, and multi-scalar combining sequences are invalid. Char is distinct from String and U32 in the contract fingerprint. Native ingress and egress validate code points independently because Bend's raw `Chr{code}` constructor does not impose Unicode validity.
+
+Scalar lookup now uses an exact-name Map. Business Data names such as `toString` and `valueOf` no longer resolve to inherited JavaScript properties. External `+` binders reuse the existing Data expansion checks. Lifecycle state ownership is checked separately and remains affine.
+
+### CPU execution and session ownership
+
+An endpoint maps to one exported Bend service. A session owns one service instance. Neither rule limits CPU evaluation to one core.
+
+Generated service workers default to two CPU evaluation threads. `worker.threads` accepts integers from 1 through 64. One selects the existing native-CPU profile; larger values select the existing multithreaded-CPU profile. Both explicitly disable GPU execution. The default avoids allocating a full hardware-sized pool for every session. It is a policy choice, not a measured performance optimum or an aggregate CPU-budget guarantee.
+
+```ts
+	const gateway = await startGateway({ worker: { threads: 4 } });
+```
+
+The FIFO queue still permits one active invocation per session. Parallel Bend computation happens within that invocation. Active disconnect or abort does not authorize another invocation before native settlement and does not authorize replay.
+
+`tests/integration/data-boundary.test.ts` observes `IO.thread_count()` and balanced-work results in the same generated stateful service for default two, explicit one, and explicit four threads. On Linux it also checks launch arguments and per-task CPU activity. State counters prove queued calls advance in order after an active abort. The previously misleading portable fixture now explicitly selects the multithreaded profile.
+
+### Build and contract defaults
+
+Staged publication remains non-crash-atomic. A process interruption between moving the old output and installing staging can leave the package at the backup path. The implementation contains a comment recording this limitation. Crash recovery is not a Phase 3 requirement.
+
+Contract identity continues to include external field order, public union case names, declaration-order constructor tags, resolved bounds, and wire policy. Internal record constructor spelling does not affect identity. Public union renames or reorderings change identity; no silent compatibility mapping or automatic renaming is introduced.
+
+Build metadata continues to record the pinned compiler, tool versions, staged Bend source/runtime hashes, and native artifact hashes. Full runtime dependency fingerprints, generator provenance, target metadata, and relocatable runtime packaging belong to Phase 4. Existing metadata does not claim those guarantees.
+
+### Phase 4 direction and prototype questions
+
+Phase 4 includes standalone packaging and durable database integration. Candidate databases include celld, SQLite, and PostgreSQL. Database selection and connector ownership remain undecided.
+
+Node startup must own configuration loading and the lifetime of Node-global resources, including connection strings and any Node-managed DB pools. Secrets and pool handles do not become endpoint arguments. Bend retains session-specific state and effects. Startup readiness, failed acquisition, graceful shutdown, and transaction ownership need prototype evidence before the interfaces are fixed.
+
+The first recommended prototype uses a Node DB client for acquisition and transactions, with generated Bend calls for Data transformations. A competing prototype puts DB operations in Bend, through either native connectors or an explicit Node capability bridge. A Node DB client is not directly callable from the current Bend worker; a bridge requires a new request/reply protocol and deadlock/error policy.
+
+Compare frequent read-modify-write workflows, not an isolated SELECT. Exercise concurrent updates, rollback on failure, startup failure, worker loss after commit but before reply, shutdown, and values beyond one frame. Measure full request paths before choosing connector ownership. Keep transaction guarantees explicit: a lost Bend reply never implies a DB rollback or permission to retry a committed write.
+
+### Proposed typed-error tradeoff
+
+User-defined Data unions already provide typed domain success and failure values with little new generator work. They do not require exposing Base Result or Maybe. Pure and IO exports already receive generated trivial lifecycles; an error union cannot remove initialization needed to acquire retained resources.
+
+A future `Effect<Success, Error, Requirements>`-style interface could declare required capabilities separately from serialized values. Node would provide named capabilities at startup, and the runtime would scope acquisition and release. This offers reusable DB services and explicit dependencies, but requires capability routing, asynchronous correlation, cancellation semantics, transaction ownership, and failure-path cleanup. It is more complex than typed error values and should follow the Phase 4 prototype rather than become a prerequisite for the current generator.
 
 ## Historical stateful prototype
 
@@ -160,7 +213,7 @@ This slice requires a complete entry-module lifecycle triple:
 	lifecycle.finalize.<name>(state: S) -> IO(Unit)
 ```
 
-The initializer and finalizer authorize the internal first parameter by matching the exact closed state type. Local state datatypes can have closed type arguments, such as `State<U32>`. The parameter's spelling does not authorize state. All callable parameters must be affine, and template parameters are rejected.
+The initializer and finalizer authorize the internal first parameter by matching the exact closed state type. Local state datatypes can have closed type arguments, such as `State<U32>`. The parameter's spelling does not authorize state. The historical slice required affine callable parameters. Current external supported Data parameters also permit `+`; lifecycle state remains affine and templates remain rejected.
 
 The external argument's actual parameter name appears inside `args`. The request and reply must each be a local, monomorphic, single-constructor Data record with 1 through 61 U32 fields. Field declaration order defines native encoding order. The internal State type is not serialized or exposed in the HTTP contract.
 
@@ -209,7 +262,7 @@ The generated service routes are `POST /rpc/counter` and `POST /rpc/accumulate`.
 
 ### Runtime and build ownership
 
-`src/service-host.ts` owns generated-service sessions and queues. It uses `NativeApp` and launches one CPU worker per session. Each session admits one active invocation, with up to eight waiting invocations by default. Waiting and close-drain limits default to 2000 milliseconds. These limits and worker deadlines are configurable through `startGateway`.
+`src/service-host.ts` owns generated-service sessions and queues. It uses `NativeApp` and launches one CPU worker process per session, with two evaluation threads by default and configurable `worker.threads` from 1 through 64. Each session admits one active invocation, with up to eight waiting invocations by default. Waiting and close-drain limits default to 2000 milliseconds. These limits and worker deadlines are configurable through `startGateway`.
 
 The host rejects expired waiting work without dispatch, drains active work on normal close, and invalidates waiting work after native failure. It does not recreate state or replay calls. Controller-level abort signals remove queued requests. The generated HTTP adapter does not yet connect caller disconnection to those signals.
 
@@ -217,7 +270,7 @@ The generated gateway is separate from the Phase 2 gateway. This design was sele
 
 `scripts/services/compiler.mjs` isolates the pinned compiler implementation API in a bounded build subprocess. This is compiler interop, not JavaScript execution of service computations. `scripts/services/inspect.ts` validates its serializable output. `scripts/services/emit.ts` derives native adapters and Node code from the checked service description.
 
-`scripts/build/services.ts` copies local source dependencies into staging, checks the staged declarations, generates code, compiles workers, and typechecks generated TypeScript before replacing the output. A rejected generation leaves the preceding complete package intact. Contract identifiers fingerprint the external schema and wire policy. Renaming an internal datatype or constructor does not change that wire contract. Build metadata records hashes of staged source, shared Bend runtime files, and native artifacts.
+`scripts/build/services.ts` copies local source dependencies into staging, checks the staged declarations, generates code, compiles workers, and typechecks generated TypeScript before replacing the output. A rejected generation leaves the preceding complete package intact. Contract identifiers fingerprint the external schema and wire policy. Renaming an internal datatype or record constructor does not change that wire contract. Renaming a public union case does change it. Build metadata records hashes of staged source, shared Bend runtime files, and native artifacts.
 
 `npm run typecheck`, `npm run test:types`, and integration or full test selections build the ignored example package before static tests import its generated modules. Generated code is not checked into the repository.
 
@@ -537,7 +590,9 @@ Acceptance requires a raw HTTP caller that does not use the oRPC client and a ca
 
 Check the generated Node client at compile time with accepted calls and rejected wrong argument types, invalid union variants, wrong service identities, and invalid result assumptions.
 
-### 8. Add the one-command build and deployable package
+### 8. Add the one-command build; defer deployable packaging to Phase 4
+
+The build path remains Phase 3 work. Standalone relocation, runtime dependency packaging, complete deployment provenance, and foreign dependency packaging in this milestone are retained as Phase 4 acceptance requirements.
 
 1. Add a CLI that accepts a Bend entry module and output directory.
 2. Run extraction, validation, generation, native compilation, and package checks in order.
@@ -562,7 +617,7 @@ Run the build twice and compare generated source and contract bytes. Change and 
 
 1. Add an explicit Phase 3 requirement inventory with exact tests and executed evidence.
 2. Run the portable Phase 2 regression suite and its completion check.
-3. Run the generated service suite, type checks, package relocation checks, and independent HTTP callers.
+3. Run the generated service suite, type checks, and independent HTTP callers. Package relocation acceptance is deferred to Phase 4.
 4. Verify the supported CPU execution profiles with generated services that contain real parallel Bend work.
 5. Record package contents, platform requirements, supported boundary types, and unsupported cases.
 6. Update this document's milestone status using actual executed results.
@@ -587,7 +642,7 @@ GPU generation or admission is not accepted through CPU fallback. If Phase 3 add
 | Failure semantics | Active infrastructure failures invalidate queued work. Declared application failures follow the service contract. Lost replies do not cause automatic replay. |
 | External access | Raw HTTP and a non-Node caller use the documented representations. |
 | Typed client | Type-check fixtures accept valid calls and reject invalid arguments and result assumptions. |
-| Deployment | A relocated package runs without the build checkout or compiler tools. |
+| Deployment, Phase 4 | A relocated package runs without the build checkout or compiler tools. |
 | Regression | Portable Phase 2 requirements still have passing executed evidence. |
 
 ## Status tracking
@@ -602,8 +657,8 @@ GPU generation or admission is not accepted through CPU fallback. If Phase 3 add
 | 5. Generated endpoints and registry | Partial | Generated service schemas, codecs, endpoints, and exact clients pass. Phase 2 registry migration remains. |
 | 6. Session invocation queue | Partial | Native-backed queue order, capacity, expiry, abort, failure, and close checks pass. HTTP disconnect wiring remains. |
 | 7. HTTP contracts and clients | Partial | Typed clients and raw oRPC HTTP pass. Portable JSON, OpenAPI, and a non-Node caller remain. |
-| 8. Build and deployment package | Partial | Staged builds, explicit bounds, generated typechecking, deterministic source, and preservation after native compilation failure pass. Standalone relocation remains. |
-| 9. Regression and publication | Partial | Main-checkout run passes all 305 tests and compiler gates. Portable report is refreshed. Final evidence audit, Phase 3 inventory, and full publication acceptance remain. |
+| 8. Build and deployment package | Build implemented; packaging deferred to Phase 4 | Staged builds, explicit bounds, generated typechecking, deterministic source, and preservation after native compilation failure pass. Standalone relocation and full provenance belong to Phase 4. |
+| 9. Regression and publication | Partial | Main-checkout run passes all 313 tests and compiler gates, including Char and parallel CPU regressions. Phase 3 inventory and full boundary/lifecycle acceptance remain. |
 
 ## Sources
 

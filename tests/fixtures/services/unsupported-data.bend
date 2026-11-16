@@ -4,7 +4,7 @@ type State is Type:
   State{value: U32}
 
 type Request is Data:
-  Request{amount: Char}
+  Request{amount: Cmp}
 
 type Reply is Data:
   Reply{value: U32}
