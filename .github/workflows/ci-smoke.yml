@@ -1,4 +1,4 @@
-name: CI smoke test
+name: CI full test
 
 on:
   workflow_dispatch:
@@ -7,7 +7,7 @@ permissions:
   contents: read
 
 jobs:
-  smoke:
+  full:
     runs-on: ubuntu-24.04
     timeout-minutes: 15
     steps:
@@ -77,5 +77,5 @@ jobs:
           report Bend "$BEND_STATUS"
           exit "$failed"
 
-      - name: Run short npm smoke test
-        run: npm run test:smoke
+      - name: Run full npm test suite
+        run: npm test
