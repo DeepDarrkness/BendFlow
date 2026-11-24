@@ -1,0 +1,81 @@
+name: CI smoke test
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  smoke:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Node.js and npm
+        id: node
+        continue-on-error: true
+        uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install npm dependencies
+        id: npm
+        if: ${{ steps.node.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          node --version
+          npm --version
+          npm ci
+
+      - name: Install Clang
+        id: clang
+        if: ${{ always() }}
+        continue-on-error: true
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang
+          clang --version
+
+      - name: Install pinned Bend
+        id: bend
+        if: ${{ always() && steps.npm.outcome == 'success' }}
+        continue-on-error: true
+        env:
+          BEND_NO_TELEMETRY: '1'
+        run: |
+          npm run setup:bend
+          node_modules/.bin/bun .toolchain/bend/bend2/main.ts version
+
+      - name: Report dependency success or failure
+        if: ${{ always() }}
+        env:
+          NODE_STATUS: ${{ steps.node.outcome }}
+          NPM_STATUS: ${{ steps.npm.outcome }}
+          CLANG_STATUS: ${{ steps.clang.outcome }}
+          BEND_STATUS: ${{ steps.bend.outcome }}
+        run: |
+          failed=0
+          report() {
+            if [ "$2" = success ]; then
+              echo "SUCCESS: $1 installed and verified"
+              echo "- SUCCESS: $1 installed and verified" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::FAILURE: $1 installation (status: $2)"
+              echo "- FAILURE: $1 installation (status: $2)" >> "$GITHUB_STEP_SUMMARY"
+              failed=1
+            fi
+          }
+          if [ "$NODE_STATUS" != success ]; then
+            NPM_STATUS="$NODE_STATUS"
+          fi
+          report npm "$NPM_STATUS"
+          report Clang "$CLANG_STATUS"
+          report Bend "$BEND_STATUS"
+          exit "$failed"
+
+      - name: Run short npm smoke test
+        run: npm run test:smoke

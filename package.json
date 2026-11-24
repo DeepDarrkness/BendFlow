@@ -25,6 +25,7 @@
     "test:integration": "node scripts/test/run.ts integration",
     "test:compiler": "node scripts/test/run.ts compiler",
     "test:types": "node scripts/test/run.ts types",
+    "test:smoke": "node --test scripts/test/smoke.test.mjs",
     "test": "node scripts/test/run.ts full",
     "conformance:portable": "node scripts/conformance/completion.ts --mode portable",
     "conformance:full": "node scripts/conformance/completion.ts --mode full",
