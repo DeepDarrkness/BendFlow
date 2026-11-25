@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { mkdtempSync, readFileSync, readdirSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { buildServices } from '../../scripts/build/services.ts';
 import { inspectServices } from '../../scripts/services/inspect.ts';
@@ -82,13 +82,16 @@ test('Unit-heavy list maximum JSON crosses 4096 bytes and reaches the native HTT
 test('real native compiler failure after staging preserves an invokable prior package', async t => {
   const root = mkdtempSync(projectPath('build/generator-preservation-'));
   t.after(() => rmSync(root, {recursive:true,force:true}));
+  const unavailableClang = resolve(root,'unavailable-clang');
+  writeFileSync(unavailableClang, '#!/bin/sh\nif [ "$1" = "--version" ]; then echo "unavailable clang"; exit 0; fi\nexit 1\n');
+  chmodSync(unavailableClang, 0o755);
   const entry = projectPath('tests/fixtures/services/unit-markers.bend');
   const out = resolve(root,'package');
   buildServices({entry,out});
   const manifest = readFileSync(resolve(out,'build.json'));
   assert.equal(inspectServices(entry).services[0]?.name,'markers');
   const result = await external(process.execPath, ['--input-type=module','-e', `
-    process.env.CC = ${JSON.stringify(resolve(root,'unavailable-clang'))};
+    process.env.CC = ${JSON.stringify(unavailableClang)};
     const {buildServices} = await import(${JSON.stringify(projectPath('scripts/build/services.ts'))});
     try {buildServices({entry:${JSON.stringify(entry)},out:${JSON.stringify(out)}});process.exitCode=1;}
     catch (error) {

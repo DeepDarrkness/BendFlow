@@ -50,6 +50,14 @@ jobs:
           npm run setup:bend
           node_modules/.bin/bun .toolchain/bend/bend2/main.ts version
 
+      - name: Install pinned Lean
+        id: lean
+        if: ${{ always() && steps.npm.outcome == 'success' }}
+        continue-on-error: true
+        run: |
+          npm run setup:lean
+          .toolchain/lean/bin/lean --version
+
       - name: Report dependency success or failure
         if: ${{ always() }}
         env:
@@ -57,6 +65,7 @@ jobs:
           NPM_STATUS: ${{ steps.npm.outcome }}
           CLANG_STATUS: ${{ steps.clang.outcome }}
           BEND_STATUS: ${{ steps.bend.outcome }}
+          LEAN_STATUS: ${{ steps.lean.outcome }}
         run: |
           failed=0
           report() {
@@ -75,6 +84,7 @@ jobs:
           report npm "$NPM_STATUS"
           report Clang "$CLANG_STATUS"
           report Bend "$BEND_STATUS"
+          report Lean "$LEAN_STATUS"
           exit "$failed"
 
       - name: Run full npm test suite
